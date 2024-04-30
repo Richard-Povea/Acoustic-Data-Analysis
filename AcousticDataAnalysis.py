@@ -13,7 +13,7 @@ st.write(
     is available here
     """)
 
-st.page_link("pages/1_📈_Vibration.py", 
+st.page_link("pages/1_🏗️_Vibration.py", 
              label="Vibration", 
              icon="🏗️")
 
