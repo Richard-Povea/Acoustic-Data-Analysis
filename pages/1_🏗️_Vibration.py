@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from typing import Literal
+from data.vibration_data import RionFile
 
 PROCESSING = False
 HELP_MEAN_CHECKER = """
@@ -13,30 +14,6 @@ This option is not available yet."""
 st.set_page_config(page_title="Vibration Analysis", page_icon="🏗️")
 st.markdown("# Vibration Analysis")
 sidebar = st.sidebar.header("Vibration Analysis")
-
-@st.cache_data
-def get_mean_axis(file):
-    data = pd.read_csv(file, skiprows=1)
-    #Filter Only the AP data
-    ap = data.filter(items=['Start Time', 'X_AP', 'Y_AP', 'Z_AP'])
-    #Parse time series
-    ap['Start Time'] = pd.to_datetime(ap['Start Time'])
-    ap.set_index('Start Time', inplace=True)
-    return ap[['X_AP', 'Y_AP', 'Z_AP']].mean().rename_axis('Receivers')
-
-@st.cache_data
-def get_sd_axis(file):
-    data = pd.read_csv(file, skiprows=1)
-    #Filter Only the AP data
-    ap = data.filter(items=['Start Time', 'X_AP', 'Y_AP', 'Z_AP'])
-    #Parse time series
-    ap['Start Time'] = pd.to_datetime(ap['Start Time'])
-    ap.set_index('Start Time', inplace=True)
-    return ap[['X_AP', 'Y_AP', 'Z_AP']].rename(columns={'X_AP':'X_STD',
-                                                        'Y_AP':'Y_STD',
-                                                        'Z_AP':'Z_STD'}).std(
-                                                        ).rename_axis('Receivers')
-
 
 with st.expander('Example of folder'):
     st.write('You can drag and drop a folder with all data from RION vibrometer like this')
@@ -145,24 +122,21 @@ calculate = st.session_state.calculate_button_clicked
 if get_mean_values and calculate:
     mean_df = pd.DataFrame(columns=['X_AP', 'Y_AP', 'Z_AP'])
     std_df = pd.DataFrame(columns=['X_STD', 'Y_STD', 'Z_STD'])
+    ppv_df = pd.DataFrame(columns=['Start Time', 'X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']) 
     folder_name = None
     for file in uploaded_files:
         file_name = file.name.split('_')
         if not folder_name:
             folder_name = file_name[0].split('/')[0]
         if 'Inst' in file_name:
+            rion_file = RionFile(file)
             name = file_name[6]
-            mean_data = get_mean_axis(file)
-            file.seek(0)
-            std_data = get_sd_axis(file)
-            mean_df.loc[name] = mean_data.values
-            std_df.loc[name] = std_data
+            ppv = rion_file.summary
+            ppv_df.loc[name] = ppv
 
-    if len(mean_df) !=0:
+    if len(ppv_df) !=0:
         with st.expander(f'Data calculated from {folder_name} folder', expanded=True):
-            st.dataframe(
-                pd.concat(
-                    [mean_df, std_df],axis=1
-                    ).rename_axis(
-                        'Receivers'
-                        ), use_container_width=True)
+            st.dataframe(ppv_df.rename(columns={'Start Time':'Measurement Time'}
+                                       ).rename_axis(
+                                           'Receivers'
+                                           ), use_container_width=True)
