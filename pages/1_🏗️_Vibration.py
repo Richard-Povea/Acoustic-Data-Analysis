@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
 from typing import Literal
+import plotly.express as px
 from data.vibration_data import RionFile
 
 PROCESSING = False
-HELP_MEAN_CHECKER = """
-    The mean of the vibration data in "AP" column is calculated for each axis.
-    The standard deviation of this is calculated for each axis too."""
+HELP_PPV_CHECKER = """
+    The ppv value of vibration data in "AP" column is calculated for each axis.
+    PPV get the maximum value of data for each axis."""
 
 HELP_FREQ_CHECKER = """
 This option is not available yet."""
@@ -49,26 +50,26 @@ options = st.container(border=True)
 
 if 'calculate_button_clicked' not in st.session_state:
     st.session_state.calculate_button_clicked = False
-if 'get_mean_values' not in st.session_state:
-    st.session_state.get_mean_values = False
+if 'get_ppv_values' not in st.session_state:
+    st.session_state.get_ppv_values = False
 if 'get_freq_values' not in st.session_state:
     st.session_state.get_freq_values = False
 
 def process_data():
     st.session_state.calculate_button_clicked = not st.session_state.calculate_button_clicked
-def get_mean_values_callback():
-    st.session_state.get_mean_values = not st.session_state.get_mean_values
+def get_ppv_values_callback():
+    st.session_state.get_ppv_values = not st.session_state.get_ppv_values
 def get_freq_values_callback():
     st.session_state.get_freq_values = not st.session_state.get_freq_values
-def get_values_checkbox(type:Literal['mean', 'freq'], 
+def get_values_checkbox(type:Literal['ppv', 'freq'], 
                       key:int, 
                       value:bool=False, 
                       disabled:bool=False,
                       help:str=''):
-    if type == 'mean':
-        return st.checkbox('Get Mean Values',
+    if type == 'ppv':
+        return st.checkbox('Get PPV Values',
                     value=value,
-                    on_change=get_mean_values_callback,
+                    on_change=get_ppv_values_callback,
                     key=key,
                     disabled=disabled,
                     help=help)
@@ -81,22 +82,22 @@ def get_values_checkbox(type:Literal['mean', 'freq'],
                     help=help)
     
 with options:
-    check_options = (st.session_state.get_mean_values or st.session_state.get_freq_values) 
+    check_options = (st.session_state.get_ppv_values or st.session_state.get_freq_values) 
     #Verificar si no hay seleccionada una opcion, o 
-    if (not (st.session_state.get_mean_values or st.session_state.get_freq_values) 
+    if (not (st.session_state.get_ppv_values or st.session_state.get_freq_values) 
         or not uploaded_files):
-        get_mean_values = get_values_checkbox('mean', 
+        get_ppv_values = get_values_checkbox('ppv', 
                                               key=1,
-                                              help=HELP_MEAN_CHECKER)
+                                              help=HELP_PPV_CHECKER)
         get_freq_values = get_values_checkbox('freq', 
                                               key=2,
                                               disabled=True)
         calculate = options.button('Go Calculate!', disabled=True)
     elif not st.session_state.calculate_button_clicked:
-        get_mean_values = get_values_checkbox('mean', 
+        get_ppv_values = get_values_checkbox('ppv', 
                                               key=3, 
-                                              value=st.session_state.get_mean_values,
-                                              help=HELP_MEAN_CHECKER)
+                                              value=st.session_state.get_ppv_values,
+                                              help=HELP_PPV_CHECKER)
         get_freq_values = get_values_checkbox('freq', 
                                               key=4, 
                                               value=st.session_state.get_freq_values,
@@ -105,9 +106,9 @@ with options:
                                    disabled=False, 
                                    on_click=process_data)
     else:
-        get_mean_values = get_values_checkbox('mean', 
+        get_ppv_values = get_values_checkbox('ppv', 
                                               key=3, 
-                                              value=st.session_state.get_mean_values, 
+                                              value=st.session_state.get_ppv_values, 
                                               disabled=True)
         get_freq_values = get_values_checkbox('freq', 
                                               key=4, 
@@ -115,15 +116,17 @@ with options:
                                               disabled=True)
         calculate = options.button('Go Calculate!', disabled=True)
 
-get_mean_values = st.session_state.get_mean_values
+get_ppv_values = st.session_state.get_ppv_values
 get_freq_values = st.session_state.get_freq_values
 calculate = st.session_state.calculate_button_clicked
 
-if get_mean_values and calculate:
-    mean_df = pd.DataFrame(columns=['X_AP', 'Y_AP', 'Z_AP'])
+if get_ppv_values and calculate:
+    ppv_df = pd.DataFrame(columns=['X_AP', 'Y_AP', 'Z_AP'])
     std_df = pd.DataFrame(columns=['X_STD', 'Y_STD', 'Z_STD'])
     ppv_df = pd.DataFrame(columns=['Start Time', 'X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']) 
     folder_name = None
+    rion_objects = {}
+
     for file in uploaded_files:
         file_name = file.name.split('_')
         if not folder_name:
@@ -131,12 +134,22 @@ if get_mean_values and calculate:
         if 'Inst' in file_name:
             rion_file = RionFile(file)
             name = file_name[6]
+            rion_objects[name] = rion_file
             ppv = rion_file.summary
             ppv_df.loc[name] = ppv
-
+    ppv_df = ppv_df.rename(columns={'Start Time':'Measurement Time'}
+                           ).rename_axis(
+                               'Receivers'
+                               ).sort_index()
     if len(ppv_df) !=0:
         with st.expander(f'Data calculated from {folder_name} folder', expanded=True):
-            st.dataframe(ppv_df.rename(columns={'Start Time':'Measurement Time'}
-                                       ).rename_axis(
-                                           'Receivers'
-                                           ), use_container_width=True)
+            st.dataframe(ppv_df, use_container_width=True)
+    
+    chart_selected = st.selectbox("Select a file to display the a chart with PPV values",
+                                  options=ppv_df.index)
+    
+    chart = px.line(rion_objects[chart_selected].ppv(),
+                    x="Start Time",
+                    y=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS'])
+
+    st.plotly_chart(chart, use_container_width=True)
