@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
-from typing import Literal
-import plotly.express as px
+from typing import Literal, Dict
+from re import search
 from data.vibration_data import RionFile
+import plotly.express as px
 
 PROCESSING = False
 HELP_PPV_CHECKER = """
@@ -125,7 +126,7 @@ if get_ppv_values and calculate:
     std_df = pd.DataFrame(columns=['X_STD', 'Y_STD', 'Z_STD'])
     ppv_df = pd.DataFrame(columns=['Start Time', 'X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']) 
     folder_name = None
-    rion_objects = {}
+    rion_objects:Dict[str, RionFile] = {}
 
     for file in uploaded_files:
         file_name = file.name.split('_')
@@ -133,7 +134,7 @@ if get_ppv_values and calculate:
             folder_name = file_name[0].split('/')[0]
         if 'Inst' in file_name:
             rion_file = RionFile(file)
-            name = file_name[6]
+            name = search(r'_(\d){4}_', file.name).group()[1:-1]
             rion_objects[name] = rion_file
             ppv = rion_file.summary
             ppv_df.loc[name] = ppv
@@ -144,12 +145,33 @@ if get_ppv_values and calculate:
     if len(ppv_df) !=0:
         with st.expander(f'Data calculated from {folder_name} folder', expanded=True):
             st.dataframe(ppv_df, use_container_width=True)
-    
-    chart_selected = st.selectbox("Select a file to display the a chart with PPV values",
-                                  options=ppv_df.index)
-    
-    chart = px.line(rion_objects[chart_selected].ppv(),
-                    x="Start Time",
-                    y=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS'])
 
-    st.plotly_chart(chart, use_container_width=True)
+        with st.expander("Details of a specific measurement"):
+
+            chart_selected = st.selectbox("Select a file to display the a chart with PPV values",
+                                        options=ppv_df.index)
+            
+            #Description of a measurement
+            st.write(f"N° of outliers: {len(rion_objects[chart_selected].outliers(1.5))}")
+            erase_outliers = st.toggle("Reduce Outliers", 
+                                       value=False, 
+                                       help="Replace the outliers values to the median value")
+            st.dataframe(pd.DataFrame(rion_objects[chart_selected].describe).T, use_container_width=True)
+            if erase_outliers:
+                dataframe = rion_objects[chart_selected].reduce_outliers()
+            else:
+                dataframe = rion_objects[chart_selected].ppv()
+
+            chart_type = st.selectbox("Select a type of chart", 
+                                      options=["Line", "Histogram", "Box"])
+            if chart_type == "Histogram":
+                chart = px.histogram(dataframe,
+                                     x=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS'])
+            if chart_type == "Line":
+                chart = px.line(dataframe,
+                                x="Start Time",
+                                y=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS'])
+            if chart_type == "Box":
+                chart = px.box(dataframe,
+                               x=['PVS'])
+            st.plotly_chart(chart, use_container_width=True)
