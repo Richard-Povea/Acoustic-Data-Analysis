@@ -1,9 +1,9 @@
 import streamlit as st
-import pandas as pd
+from pandas import DataFrame
 from typing import Literal, Dict
 from re import search
 from data.vibration_data import RionFile
-import plotly.express as px
+from plotly.express import box, histogram, line
 
 PROCESSING = False
 HELP_PPV_CHECKER = """
@@ -122,9 +122,8 @@ get_freq_values = st.session_state.get_freq_values
 calculate = st.session_state.calculate_button_clicked
 
 if get_ppv_values and calculate:
-    ppv_df = pd.DataFrame(columns=['X_AP', 'Y_AP', 'Z_AP'])
-    std_df = pd.DataFrame(columns=['X_STD', 'Y_STD', 'Z_STD'])
-    ppv_df = pd.DataFrame(columns=['Start Time', 'X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']) 
+    std_df = DataFrame(columns=['X_STD', 'Y_STD', 'Z_STD'])
+    ppv_df = DataFrame(columns=['Start Time', 'X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']) 
     folder_name = None
     rion_objects:Dict[str, RionFile] = {}
 
@@ -152,26 +151,30 @@ if get_ppv_values and calculate:
                                         options=ppv_df.index)
             
             #Description of a measurement
-            st.write(f"N° of outliers: {len(rion_objects[chart_selected].outliers(1.5))}")
             erase_outliers = st.toggle("Reduce Outliers", 
                                        value=False, 
                                        help="Replace the outliers values to the median value")
-            st.dataframe(pd.DataFrame(rion_objects[chart_selected].describe).T, use_container_width=True)
+            st.dataframe(DataFrame(rion_objects[chart_selected].describe).T, use_container_width=True)
             if erase_outliers:
-                dataframe = rion_objects[chart_selected].reduce_outliers()
+                dataframe = rion_objects[chart_selected].outliers_to_median
             else:
                 dataframe = rion_objects[chart_selected].ppv()
 
             chart_type = st.selectbox("Select a type of chart", 
                                       options=["Line", "Histogram", "Box"])
             if chart_type == "Histogram":
-                chart = px.histogram(dataframe,
+                chart = histogram(dataframe,
                                      x=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS'])
             if chart_type == "Line":
-                chart = px.line(dataframe,
+                chart = line(dataframe,
                                 x="Start Time",
                                 y=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS'])
             if chart_type == "Box":
-                chart = px.box(dataframe,
+                chart = box(dataframe,
                                x=['PVS'])
             st.plotly_chart(chart, use_container_width=True)
+        reset_button = st.button("Reset page")
+        if reset_button:
+            ppv_df = None
+            uploaded_files = None
+            st.session_state.calculate_button_clicked = False
