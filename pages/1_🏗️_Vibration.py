@@ -151,14 +151,17 @@ if get_ppv_values and calculate:
                                         options=ppv_df.index)
             
             #Description of a measurement
-            erase_outliers = st.toggle("Reduce Outliers", 
+            reduce_outliers = st.toggle("Reduce Outliers", 
                                        value=False, 
                                        help="Replace the outliers values to the median value")
-            st.dataframe(DataFrame(rion_objects[chart_selected].describe).T, use_container_width=True)
-            if erase_outliers:
+            
+            if reduce_outliers:
+                #st.dataframe(DataFrame(rion_objects[chart_selected].outliers_to_median.describe()).T, use_container_width=True)
                 dataframe = rion_objects[chart_selected].outliers_to_median
+                st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe()), use_container_width=True)
             else:
                 dataframe = rion_objects[chart_selected].ppv()
+                st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe()), use_container_width=True)
 
             chart_type = st.selectbox("Select a type of chart", 
                                       options=["Line", "Histogram", "Box"])

@@ -7,7 +7,7 @@ from .data_management import outliers_to_median
 class RionFile:
     def __init__(self, filepath:str):
         self._data = read_csv(filepath, skiprows=1, parse_dates=['Start Time'])
-        self._nonOutliersData = None
+        self._nonOutliersData = DataFrame()
 
     def ppv(self):
         """_summary_
@@ -29,7 +29,7 @@ class RionFile:
     
     @property
     def outliers_to_median(self):
-        if self._nonOutliersData:
+        if not self._nonOutliersData.empty:
             return self._nonOutliersData
         non_outliers = self.ppv()
         non_outliers['X_PPV'] = outliers_to_median(data=non_outliers['X_PPV'])
