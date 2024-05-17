@@ -1,5 +1,5 @@
 import streamlit as st
-from pandas import DataFrame, read_excel
+from pandas import DataFrame, read_excel, merge, merge_asof, concat
 from typing import Literal, Dict
 from re import search
 from data.vibration_data import RionFile
@@ -82,8 +82,11 @@ uploaded_files = sidebar.file_uploader(
 
 #Inputs to read the excel file
 input_container = sidebar.container(border=True)
-sheet_name = input_container.text_input('SheetName of memories-receivers to upload',
+sheetName_diurno = input_container.text_input('SheetName diurno',
                                         value="VIBRACIÓN - Diurno",
+                                        disabled=st.session_state.calculate_button_clicked)
+sheetName_nocturno = input_container.text_input('SheetName nocturno',
+                                        value="VIBRACIÓN - Nocturno",
                                         disabled=st.session_state.calculate_button_clicked)
 col1, col2 = input_container.columns(2)
 
@@ -145,12 +148,21 @@ if get_ppv_values and calculate:
 
     #Get the list of receivers from a excel file
     receivers_path = [file for file in uploaded_files if file.name.split('.')[-1] == 'xlsx'][0]
-    receiver_list = read_excel(receivers_path,
-                               sheet_name=sheet_name,
+    receivers:dict = read_excel(receivers_path,
+                               sheet_name=[sheetName_diurno, sheetName_nocturno],
                                usecols="{},{}".format(receivers_col,
-                                                      memories_col)).dropna()
+                                                      memories_col))
+
     with st.expander("See the receivers and memories list", expanded=False):
-        st.dataframe(receiver_list, use_container_width=True)
+        diurno:DataFrame = receivers[sheetName_diurno].dropna()
+        nocturno:DataFrame = receivers[sheetName_nocturno].dropna()
+        st.dataframe(diurno.merge(nocturno, 
+                                  how='inner', 
+                                  on="Punto de medición (AUTOMÁTICO)"
+                                  ).rename({"Memoria_x":"Diurno",
+                                            "Memoria_y":"Nocturno"},
+                                            axis=1),
+                                            use_container_width=True)
 
     for file in uploaded_files:
         file_name = file.name.split('_')
