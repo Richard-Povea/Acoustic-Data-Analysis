@@ -1,5 +1,5 @@
 import streamlit as st
-from pandas import DataFrame
+from pandas import DataFrame, read_excel
 from typing import Literal, Dict
 from re import search
 from data.vibration_data import RionFile
@@ -12,42 +12,6 @@ HELP_PPV_CHECKER = """
 
 HELP_FREQ_CHECKER = """
 This option is not available yet."""
-
-st.set_page_config(page_title="Vibration Analysis", page_icon="🏗️")
-st.markdown("# Vibration Analysis")
-sidebar = st.sidebar.header("Vibration Analysis")
-
-with st.expander('Example of folder'):
-    st.write('You can drag and drop a folder with all data from RION vibrometer like this')
-    code = '''
-        Vibrations/
-        │
-        ├── Auto_0055/
-        │   ├── Auto_Calc/
-        │       └── VM_001_OCT_Calc_0055_0001.rnd
-        │   ├── Auto_Inst/
-        │       └── VM_001_OCT_Inst_0055_0001.rnd
-        │   └── Auto_0055.rnh
-        .
-        .
-        .
-        ├── Auto_0070/
-        │   ├── Auto_Calc/
-        │       └── VM_001_OCT_Calc_0070_0001.rnd
-        │   ├── Auto_Inst/
-        │       └── VM_001_OCT_Inst_0070_0001.rnd
-        │   └── Auto_0070.rnh
-
-    '''
-    st.code(code, language='python')
-
-uploaded_files = sidebar.file_uploader(
-    "Choose a CSV file or drag and drop a folder with all data.", 
-    accept_multiple_files=True)
-
-#Options to process files
-st.markdown('### Select the process you want to upload')
-options = st.container(border=True)
 
 if 'calculate_button_clicked' not in st.session_state:
     st.session_state.calculate_button_clicked = False
@@ -81,7 +45,59 @@ def get_values_checkbox(type:Literal['ppv', 'freq'],
                     key=key,
                     disabled=disabled,
                     help=help)
-    
+ 
+
+st.set_page_config(page_title="Vibration Analysis", page_icon="🏗️")
+st.markdown("# Vibration Analysis")
+sidebar = st.sidebar
+
+with st.expander('Example of folder'):
+    st.write('You can drag and drop a folder with all data from RION vibrometer like this')
+    code = '''
+        Vibrations/
+        │
+        ├── Auto_0055/
+        │   ├── Auto_Calc/
+        │       └── VM_001_OCT_Calc_0055_0001.rnd
+        │   ├── Auto_Inst/
+        │       └── VM_001_OCT_Inst_0055_0001.rnd
+        │   └── Auto_0055.rnh
+        .
+        .
+        .
+        ├── Auto_0070/
+        │   ├── Auto_Calc/
+        │       └── VM_001_OCT_Calc_0070_0001.rnd
+        │   ├── Auto_Inst/
+        │       └── VM_001_OCT_Inst_0070_0001.rnd
+        │   └── Auto_0070.rnh
+
+    '''
+    st.code(code, language='python')
+
+#Side bar
+uploaded_files = sidebar.file_uploader(
+    "Choose a CSV file or drag and drop a folder with all data.", 
+    accept_multiple_files=True)
+
+#Inputs to read the excel file
+input_container = sidebar.container(border=True)
+sheet_name = input_container.text_input('SheetName of memories-receivers to upload',
+                                        value="VIBRACIÓN - Diurno",
+                                        disabled=st.session_state.calculate_button_clicked)
+col1, col2 = input_container.columns(2)
+
+receivers_col = col1.text_input('Receivers column', 
+                                value="A",
+                                disabled=st.session_state.calculate_button_clicked)
+memories_col = col2.text_input('Memories column', 
+                               value="E",
+                               disabled=st.session_state.calculate_button_clicked)
+
+#Options to process files
+st.markdown('### Select the process you want to upload')
+options = st.container(border=True)
+   
 with options:
     check_options = (st.session_state.get_ppv_values or st.session_state.get_freq_values) 
     #Verificar si no hay seleccionada una opcion, o 
@@ -126,6 +142,15 @@ if get_ppv_values and calculate:
     ppv_df = DataFrame(columns=['Start Time', 'X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']) 
     folder_name = None
     rion_objects:Dict[str, RionFile] = {}
+
+    #Get the list of receivers from a excel file
+    receivers_path = [file for file in uploaded_files if file.name.split('.')[-1] == 'xlsx'][0]
+    receiver_list = read_excel(receivers_path,
+                               sheet_name=sheet_name,
+                               usecols="{},{}".format(receivers_col,
+                                                      memories_col)).dropna()
+    with st.expander("See the receivers and memories list", expanded=False):
+        st.dataframe(receiver_list, use_container_width=True)
 
     for file in uploaded_files:
         file_name = file.name.split('_')

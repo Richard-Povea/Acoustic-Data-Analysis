@@ -1,5 +1,4 @@
 from pandas import DataFrame, Series, read_csv
-from scipy.stats.mstats import winsorize
 from numpy import sqrt
 from typing import Literal
 from .data_management import outliers_to_median
