@@ -1,5 +1,5 @@
 import streamlit as st
-from pandas import DataFrame, read_excel, merge, merge_asof, concat
+from pandas import DataFrame, read_excel
 from typing import Literal, Dict
 from re import search
 from data.vibration_data import RionFile
@@ -156,13 +156,13 @@ if get_ppv_values and calculate:
     with st.expander("See the receivers and memories list", expanded=False):
         diurno:DataFrame = receivers[sheetName_diurno].dropna()
         nocturno:DataFrame = receivers[sheetName_nocturno].dropna()
-        st.dataframe(diurno.merge(nocturno, 
-                                  how='inner', 
-                                  on="Punto de medición (AUTOMÁTICO)"
-                                  ).rename({"Memoria_x":"Diurno",
-                                            "Memoria_y":"Nocturno"},
-                                            axis=1),
-                                            use_container_width=True)
+        merged_records:DataFrame = diurno.merge(nocturno,
+                                                how='inner',
+                                                on="Punto de medición (AUTOMÁTICO)"
+                                                ).rename({"Memoria_x":"Diurno",
+                                                          "Memoria_y":"Nocturno"},
+                                                          axis=1).set_index("Punto de medición (AUTOMÁTICO)")
+        st.dataframe(merged_records, use_container_width=True)
 
     for file in uploaded_files:
         file_name = file.name.split('_')
@@ -181,6 +181,8 @@ if get_ppv_values and calculate:
     if len(ppv_df) !=0:
         with st.expander(f'Data calculated from {folder_name} folder', expanded=True):
             st.dataframe(ppv_df, use_container_width=True)
+            #Maximum PVS value
+            max_pvs = ppv_df['PVS'].max()
 
         with st.expander("Details of a specific measurement"):
 
@@ -188,6 +190,7 @@ if get_ppv_values and calculate:
                                         options=ppv_df.index)
             
             #Description of a measurement
+            #details_col1, detalis_col2 = st.columns()
             reduce_outliers = st.toggle("Reduce Outliers", 
                                        value=False, 
                                        help="Replace the outliers values to the median value")
@@ -195,10 +198,14 @@ if get_ppv_values and calculate:
             if reduce_outliers:
                 #st.dataframe(DataFrame(rion_objects[chart_selected].outliers_to_median.describe()).T, use_container_width=True)
                 dataframe = rion_objects[chart_selected].outliers_to_median
-                st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), use_container_width=True)
+                st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
+                             use_container_width=True)
             else:
                 dataframe = rion_objects[chart_selected].ppv()
-                st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), use_container_width=True)
+                st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
+                             use_container_width=True)
+            
+
 
             chart_type = st.selectbox("Select a type of chart", 
                                       options=["Line", "Histogram", "Box"])
@@ -212,6 +219,7 @@ if get_ppv_values and calculate:
             if chart_type == "Box":
                 chart = box(dataframe,
                                x=['PVS'])
+            #chart.update_yaxes(range=[0,max_pvs])
             st.plotly_chart(chart, use_container_width=True)
         reset_button = st.button("Reset page")
         if reset_button:
