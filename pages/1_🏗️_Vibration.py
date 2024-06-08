@@ -3,6 +3,7 @@ from pandas import DataFrame, read_excel
 from typing import Literal, Dict
 from re import search
 from data.vibration_data import RionFile
+from data.data_management import export_data
 from plotly.express import box, histogram, line
 
 PROCESSING = False
@@ -216,22 +217,33 @@ if get_ppv_values and calculate:
                 st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
                              use_container_width=True)
             
-
-
             chart_type = st.selectbox("Select a type of chart", 
                                       options=["Line", "Histogram", "Box"])
+            labels = ('Time, m/s')
             if chart_type == "Histogram":
                 chart = histogram(dataframe,
                                      x=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS'])
             if chart_type == "Line":
                 chart = line(dataframe,
                                 x="Start Time",
-                                y=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS'])
+                                y=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']).update_layout(
+                                    xaxis_title = "Time [hh:mm]", 
+                                    yaxis_title = "Displacement [m/s]",
+                                    legend_title = "Metrics"
+                                )
             if chart_type == "Box":
                 chart = box(dataframe,
                                x=['PVS'])
             #chart.update_yaxes(range=[0,max_pvs])
             st.plotly_chart(chart, use_container_width=True)
+
+        st.download_button(
+            label="Download the Summary",
+            data=export_data(ppv_df),
+            file_name="Vibration_summary.xlsx",
+            mime="application/vnd.ms-excel"
+        )
+        
         reset_button = st.button("Reset page")
         if reset_button:
             ppv_df = None
