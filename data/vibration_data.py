@@ -1,13 +1,14 @@
 from pandas import DataFrame, Series, read_csv
-from scipy.stats.mstats import winsorize
 from numpy import sqrt
 from typing import Literal
 from .data_management import outliers_to_median
+from re import search
 
 class RionFile:
     def __init__(self, filepath:str):
         self._data = read_csv(filepath, skiprows=1, parse_dates=['Start Time'])
         self._nonOutliersData = DataFrame()
+        self.file_name = str(search(r'_(\d){4}_', filepath.name).group()[1:-1])
 
     def ppv(self):
         """_summary_
@@ -26,7 +27,7 @@ class RionFile:
     
     def __getitem__(self, key:Literal['X_AP', 'Y_AP', 'Z_AP'])->Series:
         return self._data[key]
-    
+
     @property
     def outliers_to_median(self):
         if not self._nonOutliersData.empty:

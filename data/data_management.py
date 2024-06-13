@@ -1,4 +1,5 @@
-from pandas import Series
+from pandas import Series, DataFrame, ExcelWriter
+from io import BytesIO
 
 def get_outliers(data:Series, k_factor:int=1.5)->Series:
     seventy_fifth = data.quantile(0.75)
@@ -21,3 +22,10 @@ def outliers_to_median(data:Series, outliers:Series=None)->Series:
     median = data.median()
     data.loc[outliers.index] = median
     return data
+
+def export_data(df:DataFrame):
+    buffer = BytesIO()
+    with ExcelWriter(buffer, engine='xlsxwriter') as writer:
+        df.to_excel(writer, sheet_name='Vibration Summary')
+        writer.close()
+    return buffer
