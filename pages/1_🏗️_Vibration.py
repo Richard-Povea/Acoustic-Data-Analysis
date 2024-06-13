@@ -196,7 +196,6 @@ if get_ppv_values and calculate:
                                        help="Replace the outliers values to the median value")
             
             if reduce_outliers:
-                #st.dataframe(DataFrame(rion_objects[chart_selected].outliers_to_median.describe()).T, use_container_width=True)
                 dataframe = rion_objects[chart_selected].outliers_to_median
                 st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
                              use_container_width=True)
