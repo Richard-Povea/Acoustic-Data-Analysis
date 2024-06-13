@@ -3,6 +3,7 @@ from pandas import DataFrame, read_excel
 from typing import Literal, Dict
 from re import search
 from data.vibration_data import RionFile
+from data.data_management import export_data
 from plotly.express import box, histogram, line
 
 PROCESSING = False
@@ -153,16 +154,20 @@ if get_ppv_values and calculate:
                                usecols="{},{}".format(receivers_col,
                                                       memories_col))
 
-    with st.expander("See the receivers and memories list", expanded=False):
+    def excel_data(receivers:dict):
         diurno:DataFrame = receivers[sheetName_diurno].dropna()
         nocturno:DataFrame = receivers[sheetName_nocturno].dropna()
-        merged_records:DataFrame = diurno.merge(nocturno,
-                                                how='inner',
-                                                on="Punto de medición (AUTOMÁTICO)"
-                                                ).rename({"Memoria_x":"Diurno",
-                                                          "Memoria_y":"Nocturno"},
-                                                          axis=1).set_index("Punto de medición (AUTOMÁTICO)")
-        st.dataframe(merged_records, use_container_width=True)
+        if not nocturno.size:
+            return diurno.set_index('Punto de medición (AUTOMÁTICO)')
+        return diurno.merge(nocturno,
+                            how='inner',
+                            on="Punto de medición (AUTOMÁTICO)"
+                            ).rename({"Memoria_x":"Diurno",
+                                      "Memoria_y":"Nocturno"},
+                                      axis=1).set_index("Punto de medición (AUTOMÁTICO)")
+    receivers_data = excel_data(receivers)
+    with st.expander("See the receivers and memories list", expanded=False):
+        st.dataframe(receivers_data, use_container_width=True)
 
     for file in uploaded_files:
         file_name = file.name.split('_')
@@ -170,7 +175,7 @@ if get_ppv_values and calculate:
             folder_name = file_name[0].split('/')[0]
         if 'Inst' in file_name:
             rion_file = RionFile(file)
-            name = search(r'_(\d){4}_', file.name).group()[1:-1]
+            name = rion_file.file_name
             rion_objects[name] = rion_file
             ppv = rion_file.summary
             ppv_df.loc[name] = ppv
@@ -178,7 +183,13 @@ if get_ppv_values and calculate:
                            ).rename_axis(
                                'Receivers'
                                ).sort_index()
-    if len(ppv_df) !=0:
+    names_files_dict = {name:filename for name, 
+                       filename in zip(receivers_data.sort_values(by="Memoria").index,
+                                       ppv_df.index)}
+
+    ppv_df.index = receivers_data.sort_values(by="Memoria").index
+
+    if len(ppv_df)!=0:
         with st.expander(f'Data calculated from {folder_name} folder', expanded=True):
             st.dataframe(ppv_df, use_container_width=True)
             #Maximum PVS value
@@ -188,6 +199,7 @@ if get_ppv_values and calculate:
 
             chart_selected = st.selectbox("Select a file to display the a chart with PPV values",
                                         options=ppv_df.index)
+            chart_selected = names_files_dict.get(chart_selected)
             
             #Description of a measurement
             #details_col1, detalis_col2 = st.columns()
@@ -204,22 +216,33 @@ if get_ppv_values and calculate:
                 st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
                              use_container_width=True)
             
-
-
             chart_type = st.selectbox("Select a type of chart", 
                                       options=["Line", "Histogram", "Box"])
+            labels = ('Time, m/s')
             if chart_type == "Histogram":
                 chart = histogram(dataframe,
                                      x=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS'])
             if chart_type == "Line":
                 chart = line(dataframe,
                                 x="Start Time",
-                                y=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS'])
+                                y=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']).update_layout(
+                                    xaxis_title = "Time [hh:mm]", 
+                                    yaxis_title = "Displacement [m/s]",
+                                    legend_title = "Metrics"
+                                )
             if chart_type == "Box":
                 chart = box(dataframe,
                                x=['PVS'])
             #chart.update_yaxes(range=[0,max_pvs])
             st.plotly_chart(chart, use_container_width=True)
+
+        st.download_button(
+            label="Download the Summary",
+            data=export_data(ppv_df),
+            file_name="Vibration_summary.xlsx",
+            mime="application/vnd.ms-excel"
+        )
+        
         reset_button = st.button("Reset page")
         if reset_button:
             ppv_df = None
