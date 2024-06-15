@@ -1,7 +1,6 @@
 import streamlit as st
-from pandas import DataFrame, read_excel
+from pandas import DataFrame, read_excel, concat, MultiIndex, to_datetime
 from typing import Literal, Dict
-from re import search
 from data.vibration_data import RionFile
 from data.data_management import export_data
 from plotly.express import box, histogram, line
@@ -154,7 +153,7 @@ if get_ppv_values and calculate:
                                usecols="{},{}".format(receivers_col,
                                                       memories_col))
 
-    def excel_data(receivers:dict):
+    def excel_data(receivers:dict)->DataFrame:
         diurno:DataFrame = receivers[sheetName_diurno].dropna()
         nocturno:DataFrame = receivers[sheetName_nocturno].dropna()
         if not nocturno.size:
@@ -164,8 +163,11 @@ if get_ppv_values and calculate:
                             on="Punto de medición (AUTOMÁTICO)"
                             ).rename({"Memoria_x":"Diurno",
                                       "Memoria_y":"Nocturno"},
-                                      axis=1).set_index("Punto de medición (AUTOMÁTICO)")
+                                      axis=1
+                                      ).set_index("Punto de medición (AUTOMÁTICO)").rename_axis("Receivers")
     receivers_data = excel_data(receivers)
+    receivers_data['Diurno'] = receivers_data['Diurno'].apply(lambda x: str(int(x)).zfill(4))
+    receivers_data['Nocturno'] = receivers_data['Nocturno'].apply(lambda x: str(int(x)).zfill(4))
     with st.expander("See the receivers and memories list", expanded=False):
         st.dataframe(receivers_data, use_container_width=True)
 
@@ -179,15 +181,23 @@ if get_ppv_values and calculate:
             rion_objects[name] = rion_file
             ppv = rion_file.summary
             ppv_df.loc[name] = ppv
+    st.dataframe(receivers_data)
+    st.write(receivers_data['Diurno'])
+    st.write(receivers_data['Nocturno'])
+    all_files = concat([receivers_data['Diurno'],
+                     receivers_data['Nocturno']])
+    all_files.name = 'Files'
+    st.write(all_files)
+    arrays = list(zip(all_files.index.to_list(),
+                      all_files.values))
+    new_index = MultiIndex.from_tuples(arrays, names=['Receiver','File'])
     ppv_df = ppv_df.rename(columns={'Start Time':'Measurement Time'}
                            ).rename_axis(
                                'Receivers'
                                ).sort_index()
-    names_files_dict = {name:filename for name, 
-                       filename in zip(receivers_data.sort_values(by="Memoria").index,
-                                       ppv_df.index)}
-
-    ppv_df.index = receivers_data.sort_values(by="Memoria").index
+    ppv_df['Measurement Time'] = to_datetime(ppv_df['Measurement Time'])
+    ppv_df = ppv_df.set_index(new_index)
+    st.dataframe(ppv_df, use_container_width=True)   
 
     if len(ppv_df)!=0:
         with st.expander(f'Data calculated from {folder_name} folder', expanded=True):
