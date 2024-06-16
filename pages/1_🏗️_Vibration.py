@@ -1,5 +1,5 @@
 import streamlit as st
-from pandas import DataFrame, read_excel, concat, MultiIndex, to_datetime
+from pandas import DataFrame, read_excel, concat, MultiIndex, to_datetime, Series
 from typing import Literal, Dict
 from data.vibration_data import RionFile
 from data.data_management import export_data
@@ -179,16 +179,21 @@ if get_ppv_values and calculate:
             rion_file = RionFile(file)
             name = rion_file.file_name
             rion_objects[name] = rion_file
-            ppv = rion_file.summary
+            ppv = rion_file.max_pvs
             ppv_df.loc[name] = ppv
     st.dataframe(receivers_data)
+    st.write(rion_objects.keys())
+    st.write(rion_objects['0251'].start_time)
+    st.write(rion_objects['0251'].period)
+    st.write("All Files")
     st.write(receivers_data['Diurno'])
     st.write(receivers_data['Nocturno'])
-    all_files = concat([receivers_data['Diurno'],
+    all_files:Series = concat([receivers_data['Diurno'],
                      receivers_data['Nocturno']])
     all_files.name = 'Files'
     st.write(all_files)
-    arrays = list(zip(all_files.index.to_list(),
+    st.write((all_files=='0251'))
+    arrays = list(zip([file.strip() for file in all_files.index.to_list()],
                       all_files.values))
     new_index = MultiIndex.from_tuples(arrays, names=['Receiver','File'])
     ppv_df = ppv_df.rename(columns={'Start Time':'Measurement Time'}
@@ -208,8 +213,9 @@ if get_ppv_values and calculate:
         with st.expander("Details of a specific measurement"):
 
             chart_selected = st.selectbox("Select a file to display the a chart with PPV values",
-                                        options=ppv_df.index)
-            chart_selected = names_files_dict.get(chart_selected)
+                                        options=ppv_df.index.get_level_values(0))
+            st.write(rion_objects.keys())
+            st.dataframe(ppv_df.loc[chart_selected], use_container_width=True)
             
             #Description of a measurement
             #details_col1, detalis_col2 = st.columns()

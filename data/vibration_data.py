@@ -1,4 +1,4 @@
-from pandas import DataFrame, Series, read_csv
+from pandas import DataFrame, Series, Timestamp, read_csv
 from numpy import sqrt
 from typing import Literal
 from .data_management import outliers_to_median
@@ -9,12 +9,16 @@ class RionFile:
         self._data = read_csv(filepath, skiprows=1, parse_dates=['Start Time'])
         self._nonOutliersData = DataFrame()
         self.file_name = str(search(r'_(\d){4}_', filepath.name).group()[1:-1])
+        
+    def __getitem__(self, key:Literal['X_AP', 'Y_AP', 'Z_AP'])->Series:
+        return self._data[key]
 
+    @property
     def ppv(self):
-        """_summary_
+        """ 
+        Returns a DataFrame representation of the measurement data. 
 
-        Args:
-            interval (int, optional): Interval time to calculate PPV. Defaults to 1 ms.
+        Columns are 'Start Time', 'X_AP', 'Y_AP', 'Z_AP' and 'PVS'
 
         Returns:
             _type_: DataFrame
@@ -25,11 +29,26 @@ class RionFile:
         ppvs['PVS'] = sqrt(ppvs['X_AP']**2 + ppvs['Y_AP']**2 + ppvs['Z_AP']**2)
         return ppvs.rename(columns={'X_AP': 'X_PPV', 'Y_AP': 'Y_PPV', 'Z_AP':'Z_PPV'})
     
-    def __getitem__(self, key:Literal['X_AP', 'Y_AP', 'Z_AP'])->Series:
-        return self._data[key]
+    @property
+    def start_time(self)->Timestamp:
+        return self._data['Start Time'].min()
+    
+    @property
+    def period(self)->str:
+        hour = self.start_time.hour
+        if 7<hour and hour<21:
+            return 'Diurno'
+        else:
+            return 'Nocturno'
 
     @property
     def outliers_to_median(self):
+        """
+        Replace outliers with median values for
+
+        Returns:
+            _type_: DataFrame with outliers replaced by median values
+        """
         if not self._nonOutliersData.empty:
             return self._nonOutliersData
         non_outliers = self.ppv()
@@ -41,7 +60,12 @@ class RionFile:
         return non_outliers
 
     @property
-    def summary(self):
+    def max_pvs(self)->Series:
+        """
+
+        Returns:
+            _type_: Series with the maximum value of the measurement.
+        """
         ppvs = self.ppv()
         max_pvs = ppvs['PVS'].idxmax()
         return ppvs.loc[max_pvs]
