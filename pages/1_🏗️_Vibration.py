@@ -1,8 +1,8 @@
 import streamlit as st
 from pandas import DataFrame, read_excel, concat, MultiIndex, to_datetime, Series
 from typing import Literal, Dict
-from data.vibration_data import RionFile
 from data.data_management import export_data
+from measurements.vibration import RIONVibrations
 from plotly.express import box, histogram, line
 
 PROCESSING = False
@@ -144,14 +144,15 @@ if get_ppv_values and calculate:
     std_df = DataFrame(columns=['X_STD', 'Y_STD', 'Z_STD'])
     ppv_df = DataFrame(columns=['Start Time', 'X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']) 
     folder_name = None
-    rion_objects:Dict[str, RionFile] = {}
+    rion_objects:Dict[str, RIONVibrations] = {}
 
     #Get the list of receivers from a excel file
     receivers_path = [file for file in uploaded_files if file.name.split('.')[-1] == 'xlsx'][0]
     receivers:dict = read_excel(receivers_path,
                                sheet_name=[sheetName_diurno, sheetName_nocturno],
                                usecols="{},{}".format(receivers_col,
-                                                      memories_col))
+                                                      memories_col),
+                                                      parse_dates=True)
 
     def excel_data(receivers:dict)->DataFrame:
         diurno:DataFrame = receivers[sheetName_diurno].dropna()
@@ -171,28 +172,20 @@ if get_ppv_values and calculate:
     with st.expander("See the receivers and memories list", expanded=False):
         st.dataframe(receivers_data, use_container_width=True)
 
+
     for file in uploaded_files:
         file_name = file.name.split('_')
         if not folder_name:
             folder_name = file_name[0].split('/')[0]
         if 'Inst' in file_name:
-            rion_file = RionFile(file)
-            name = rion_file.file_name
+            rion_file = RIONVibrations(file, 'a')
+            name = rion_file.file_number
             rion_objects[name] = rion_file
-            ppv = rion_file.max_pvs
-            ppv_df.loc[name] = ppv
-    st.dataframe(receivers_data)
-    st.write(rion_objects.keys())
-    st.write(rion_objects['0251'].start_time)
-    st.write(rion_objects['0251'].period)
-    st.write("All Files")
-    st.write(receivers_data['Diurno'])
-    st.write(receivers_data['Nocturno'])
+            ppv_df.loc[name] = rion_file.summary.loc[rion_file.summary['PVS'].idxmax()]
+
     all_files:Series = concat([receivers_data['Diurno'],
                      receivers_data['Nocturno']])
     all_files.name = 'Files'
-    st.write(all_files)
-    st.write((all_files=='0251'))
     arrays = list(zip([file.strip() for file in all_files.index.to_list()],
                       all_files.values))
     new_index = MultiIndex.from_tuples(arrays, names=['Receiver','File'])
@@ -200,9 +193,9 @@ if get_ppv_values and calculate:
                            ).rename_axis(
                                'Receivers'
                                ).sort_index()
+    ppv_df_no_format = ppv_df.copy()
     ppv_df['Measurement Time'] = to_datetime(ppv_df['Measurement Time'])
-    ppv_df = ppv_df.set_index(new_index)
-    st.dataframe(ppv_df, use_container_width=True)   
+    #ppv_df = ppv_df.set_index(new_index)  
 
     if len(ppv_df)!=0:
         with st.expander(f'Data calculated from {folder_name} folder', expanded=True):
@@ -228,7 +221,7 @@ if get_ppv_values and calculate:
                 st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
                              use_container_width=True)
             else:
-                dataframe = rion_objects[chart_selected].ppv()
+                dataframe = rion_objects[chart_selected].summary
                 st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
                              use_container_width=True)
             
