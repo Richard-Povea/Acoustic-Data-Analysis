@@ -5,16 +5,24 @@ from re import search
 from typing import Literal
 from data.data_management import outliers_to_median
 
+def get_receiver_name(file_number:str, receivers_data:DataFrame):
+        idx = receivers_data.isin((file_number,))
+        return receivers_data[idx].dropna(axis=0, how='all').index.values[0]
+
 class Vibrations(ABC):
     COLUMNS = ('Start Time', 'X_AP', 'Y_AP', 'Z_AP', 'PVS')
-    def __init__(self, file_path, receiver):
+    def __init__(self, file_path, receivers_data:DataFrame):
         self.file_path = file_path
-        self.receiver = receiver
+        self.receivers_data:DataFrame = receivers_data
         self._nonOutliersData = DataFrame()
 
     @property
+    def receiver(self):
+        return get_receiver_name(self.file_number, self.receivers_data)
+
+    @property
     def start_time(self)->Timestamp:
-        return self.process_data['Start Time'].min()
+        return self.process_data()['Start Time'].min()
     
     @property
     def period(self)->str:
@@ -77,8 +85,8 @@ class Vibrations(ABC):
 
 class RIONVibrations(Vibrations):
 
-    def __init__(self, file_path:str, receiver:str):
-        super().__init__(file_path, receiver)
+    def __init__(self, file_path:str, receivers_data:DataFrame):
+        super().__init__(file_path, receivers_data)
         self._data = self._load_data()
         self.summary = self.process_data()
     @property

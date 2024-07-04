@@ -31,5 +31,4 @@ def export_data(df:DataFrame):
     buffer = BytesIO()
     with ExcelWriter(buffer, engine='xlsxwriter') as writer:
         df.to_excel(writer, sheet_name='Vibration Summary')
-        writer.close()
     return buffer

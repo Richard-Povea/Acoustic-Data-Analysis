@@ -1,5 +1,5 @@
 import streamlit as st
-from pandas import DataFrame, read_excel, concat, MultiIndex, to_datetime, Series
+from pandas import DataFrame, MultiIndex, Series, to_datetime, read_excel, concat
 from typing import Literal, Dict
 from data.data_management import export_data
 from measurements.vibration import RIONVibrations
@@ -140,6 +140,9 @@ get_ppv_values = st.session_state.get_ppv_values
 get_freq_values = st.session_state.get_freq_values
 calculate = st.session_state.calculate_button_clicked
 
+if not(get_ppv_values and calculate):
+    st.warning('Please upload files')
+
 if get_ppv_values and calculate:
     std_df = DataFrame(columns=['X_STD', 'Y_STD', 'Z_STD'])
     ppv_df = DataFrame(columns=['Start Time', 'X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']) 
@@ -169,19 +172,15 @@ if get_ppv_values and calculate:
     receivers_data = excel_data(receivers)
     receivers_data['Diurno'] = receivers_data['Diurno'].apply(lambda x: str(int(x)).zfill(4))
     receivers_data['Nocturno'] = receivers_data['Nocturno'].apply(lambda x: str(int(x)).zfill(4))
-    with st.expander("See the receivers and memories list", expanded=False):
-        st.dataframe(receivers_data, use_container_width=True)
-
 
     for file in uploaded_files:
         file_name = file.name.split('_')
         if not folder_name:
             folder_name = file_name[0].split('/')[0]
         if 'Inst' in file_name:
-            rion_file = RIONVibrations(file, 'a')
-            name = rion_file.file_number
-            rion_objects[name] = rion_file
-            ppv_df.loc[name] = rion_file.summary.loc[rion_file.summary['PVS'].idxmax()]
+            rion_file = RIONVibrations(file, receivers_data)
+            rion_objects[rion_file.receiver] = rion_file
+            ppv_df.loc[rion_file.file_number] = rion_file.summary.loc[rion_file.summary['PVS'].idxmax()]
 
     all_files:Series = concat([receivers_data['Diurno'],
                      receivers_data['Nocturno']])
@@ -195,7 +194,7 @@ if get_ppv_values and calculate:
                                ).sort_index()
     ppv_df_no_format = ppv_df.copy()
     ppv_df['Measurement Time'] = to_datetime(ppv_df['Measurement Time'])
-    #ppv_df = ppv_df.set_index(new_index)  
+    ppv_df = ppv_df.set_index(new_index)  
 
     if len(ppv_df)!=0:
         with st.expander(f'Data calculated from {folder_name} folder', expanded=True):
@@ -206,8 +205,7 @@ if get_ppv_values and calculate:
         with st.expander("Details of a specific measurement"):
 
             chart_selected = st.selectbox("Select a file to display the a chart with PPV values",
-                                        options=ppv_df.index.get_level_values(0))
-            st.write(rion_objects.keys())
+                                        options=ppv_df.index.get_level_values(0).unique())
             st.dataframe(ppv_df.loc[chart_selected], use_container_width=True)
             
             #Description of a measurement
@@ -246,7 +244,7 @@ if get_ppv_values and calculate:
             st.plotly_chart(chart, use_container_width=True)
 
         st.download_button(
-            label="Download the Summary",
+            label="Download Summary",
             data=export_data(ppv_df),
             file_name="Vibration_summary.xlsx",
             mime="application/vnd.ms-excel"
@@ -255,5 +253,8 @@ if get_ppv_values and calculate:
         reset_button = st.button("Reset page")
         if reset_button:
             ppv_df = None
-            uploaded_files = None
+            uploaded_files.clear()
+            st.cache_resource.clear()
+            st.cache_data.clear()
             st.session_state.calculate_button_clicked = False
+            st.experimental_rerun()
