@@ -257,4 +257,3 @@ if get_ppv_values and calculate:
             st.cache_resource.clear()
             st.cache_data.clear()
             st.session_state.calculate_button_clicked = False
-            st.experimental_rerun()
