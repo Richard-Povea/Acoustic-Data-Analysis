@@ -4,6 +4,7 @@ from pandas import DataFrame, Series, Timestamp, read_csv, to_datetime
 from re import search
 from typing import Literal
 from data.data_management import outliers_to_median
+from documents.documents import BaseLine
 
 def get_receiver_name(file_number:str, receivers_data:DataFrame):
         idx = receivers_data.isin((file_number,))
@@ -11,14 +12,14 @@ def get_receiver_name(file_number:str, receivers_data:DataFrame):
 
 class Vibrations(ABC):
     COLUMNS = ('Start Time', 'X_AP', 'Y_AP', 'Z_AP', 'PVS')
-    def __init__(self, file_path, receivers_data:DataFrame):
+    def __init__(self, file_path, baseline:BaseLine):
         self.file_path = file_path
-        self.receivers_data:DataFrame = receivers_data
+        self.baseline = baseline
         self._nonOutliersData = DataFrame()
 
     @property
     def receiver(self):
-        return get_receiver_name(self.file_number, self.receivers_data)
+        return self.baseline.find_receiver_from_fileNumber(self.file_number)
 
     @property
     def start_time(self)->Timestamp:
@@ -85,8 +86,8 @@ class Vibrations(ABC):
 
 class RIONVibrations(Vibrations):
 
-    def __init__(self, file_path:str, receivers_data:DataFrame):
-        super().__init__(file_path, receivers_data)
+    def __init__(self, file_path:str, baseline:BaseLine):
+        super().__init__(file_path, baseline)
         self._data = self._load_data()
         self.summary = self.process_data()
     @property

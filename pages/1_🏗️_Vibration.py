@@ -3,9 +3,9 @@ from pandas import DataFrame, MultiIndex, Series, to_datetime, read_excel, conca
 from typing import Literal, Dict
 from data.data_management import export_data
 from measurements.vibration import RIONVibrations
+from documents.documents import get_receivers_path, BaseLine, FileNotFoundError
 from plotly.express import box, histogram, line
 
-PROCESSING = False
 HELP_PPV_CHECKER = """
     The ppv value of vibration data in "AP" column is calculated for each axis.
     PPV get the maximum value of data for each axis."""
@@ -17,15 +17,12 @@ if 'calculate_button_clicked' not in st.session_state:
     st.session_state.calculate_button_clicked = False
 if 'get_ppv_values' not in st.session_state:
     st.session_state.get_ppv_values = False
-if 'get_freq_values' not in st.session_state:
-    st.session_state.get_freq_values = False
+
 
 def process_data():
     st.session_state.calculate_button_clicked = not st.session_state.calculate_button_clicked
 def get_ppv_values_callback():
     st.session_state.get_ppv_values = not st.session_state.get_ppv_values
-def get_freq_values_callback():
-    st.session_state.get_freq_values = not st.session_state.get_freq_values
 def get_values_checkbox(type:Literal['ppv', 'freq'], 
                       key:int, 
                       value:bool=False, 
@@ -38,14 +35,13 @@ def get_values_checkbox(type:Literal['ppv', 'freq'],
                     key=key,
                     disabled=disabled,
                     help=help)
-    if type == 'freq':
-        return st.checkbox('Get Freq Values',
-                    value=value,
-                    on_change=get_freq_values_callback,
-                    key=key,
-                    disabled=disabled,
-                    help=help)
  
+def reset_page():
+    uploaded_files.clear()
+    st.cache_resource.clear()
+    st.cache_data.clear()
+    st.session_state.calculate_button_clicked = False
+    st.rerun()
 
 st.set_page_config(page_title="Vibration Analysis", page_icon="🏗️")
 st.markdown("# Vibration Analysis")
@@ -102,46 +98,45 @@ st.markdown('### Select the process you want to upload')
 options = st.container(border=True)
    
 with options:
-    check_options = (st.session_state.get_ppv_values or st.session_state.get_freq_values) 
     #Verificar si no hay seleccionada una opcion, o 
-    if (not (st.session_state.get_ppv_values or st.session_state.get_freq_values) 
-        or not uploaded_files):
+    if (not (st.session_state.get_ppv_values) or not uploaded_files):
         get_ppv_values = get_values_checkbox('ppv', 
                                               key=1,
                                               help=HELP_PPV_CHECKER)
-        get_freq_values = get_values_checkbox('freq', 
-                                              key=2,
-                                              disabled=True)
         calculate = options.button('Go Calculate!', disabled=True)
     elif not st.session_state.calculate_button_clicked:
         get_ppv_values = get_values_checkbox('ppv', 
                                               key=3, 
                                               value=st.session_state.get_ppv_values,
                                               help=HELP_PPV_CHECKER)
-        get_freq_values = get_values_checkbox('freq', 
-                                              key=4, 
-                                              value=st.session_state.get_freq_values,
-                                              disabled=True)
         calculate = options.button('Go Calculate!', 
                                    disabled=False, 
                                    on_click=process_data)
-    else:
+    elif st.session_state.calculate_button_clicked:
         get_ppv_values = get_values_checkbox('ppv', 
                                               key=3, 
                                               value=st.session_state.get_ppv_values, 
                                               disabled=True)
-        get_freq_values = get_values_checkbox('freq', 
-                                              key=4, 
-                                              value=st.session_state.get_freq_values, 
-                                              disabled=True)
         calculate = options.button('Go Calculate!', disabled=True)
 
 get_ppv_values = st.session_state.get_ppv_values
-get_freq_values = st.session_state.get_freq_values
 calculate = st.session_state.calculate_button_clicked
 
 if not(get_ppv_values and calculate):
     st.warning('Please upload files')
+
+def excel_data(receivers:dict)->DataFrame:
+    diurno:DataFrame = receivers[sheetName_diurno].dropna()
+    nocturno:DataFrame = receivers[sheetName_nocturno].dropna()
+    if not nocturno.size:
+        return diurno.set_index('Punto de medición (AUTOMÁTICO)')
+    return diurno.merge(nocturno,
+                        how='inner',
+                        on="Punto de medición (AUTOMÁTICO)"
+                        ).rename({"Memoria_x":"Diurno",
+                                    "Memoria_y":"Nocturno"},
+                                    axis=1
+                                    ).set_index("Punto de medición (AUTOMÁTICO)").rename_axis("Receivers")
 
 if get_ppv_values and calculate:
     std_df = DataFrame(columns=['X_STD', 'Y_STD', 'Z_STD'])
@@ -150,35 +145,32 @@ if get_ppv_values and calculate:
     rion_objects:Dict[str, RIONVibrations] = {}
 
     #Get the list of receivers from a excel file
-    receivers_path = [file for file in uploaded_files if file.name.split('.')[-1] == 'xlsx'][0]
-    receivers:dict = read_excel(receivers_path,
-                               sheet_name=[sheetName_diurno, sheetName_nocturno],
-                               usecols="{},{}".format(receivers_col,
-                                                      memories_col),
-                                                      parse_dates=True)
-
-    def excel_data(receivers:dict)->DataFrame:
-        diurno:DataFrame = receivers[sheetName_diurno].dropna()
-        nocturno:DataFrame = receivers[sheetName_nocturno].dropna()
-        if not nocturno.size:
-            return diurno.set_index('Punto de medición (AUTOMÁTICO)')
-        return diurno.merge(nocturno,
-                            how='inner',
-                            on="Punto de medición (AUTOMÁTICO)"
-                            ).rename({"Memoria_x":"Diurno",
-                                      "Memoria_y":"Nocturno"},
-                                      axis=1
-                                      ).set_index("Punto de medición (AUTOMÁTICO)").rename_axis("Receivers")
-    receivers_data = excel_data(receivers)
-    receivers_data['Diurno'] = receivers_data['Diurno'].apply(lambda x: str(int(x)).zfill(4))
-    receivers_data['Nocturno'] = receivers_data['Nocturno'].apply(lambda x: str(int(x)).zfill(4))
-
+    try:
+        receivers_path = get_receivers_path(uploaded_files)
+        
+    except FileNotFoundError as error:
+        import time
+        st.error('Receivers file not found, please try again')
+        st.session_state.calculate_button_clicked = False
+        time.sleep(2)
+        st.rerun()
+    
+    baseline = BaseLine(receivers_path)
+    receivers_data = baseline.receivers
+      
     for file in uploaded_files:
         file_name = file.name.split('_')
         if not folder_name:
             folder_name = file_name[0].split('/')[0]
         if 'Inst' in file_name:
-            rion_file = RIONVibrations(file, receivers_data)
+            rion_file = RIONVibrations(file, baseline)
+            receiver = rion_file.receiver
+            print('----------------------------------------------------------------')
+            print(rion_file.file_number)
+            print(receiver)
+            print('----------------------------------------------------------------')
+            if rion_file == None:
+                continue
             rion_objects[rion_file.receiver] = rion_file
             ppv_df.loc[rion_file.file_number] = rion_file.summary.loc[rion_file.summary['PVS'].idxmax()]
 
@@ -252,8 +244,4 @@ if get_ppv_values and calculate:
         
         reset_button = st.button("Reset page")
         if reset_button:
-            ppv_df = None
-            uploaded_files.clear()
-            st.cache_resource.clear()
-            st.cache_data.clear()
-            st.session_state.calculate_button_clicked = False
+            reset_page()
