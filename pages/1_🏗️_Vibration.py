@@ -1,5 +1,5 @@
 import streamlit as st
-from pandas import DataFrame, MultiIndex, Series, to_datetime, read_excel, concat
+from pandas import DataFrame, Series, to_datetime, concat
 from typing import Literal, Dict
 from data.data_management import export_data
 from measurements.vibration import RIONVibrations
@@ -43,7 +43,9 @@ def reset_page():
     st.session_state.calculate_button_clicked = False
     st.rerun()
 
-st.set_page_config(page_title="Vibration Analysis", page_icon="🏗️")
+st.set_page_config(page_title="Vibration Analysis", 
+                   page_icon="🏗️",
+                   layout="wide")
 st.markdown("# Vibration Analysis")
 sidebar = st.sidebar
 
@@ -125,22 +127,9 @@ calculate = st.session_state.calculate_button_clicked
 if not(get_ppv_values and calculate):
     st.warning('Please upload files')
 
-def excel_data(receivers:dict)->DataFrame:
-    diurno:DataFrame = receivers[sheetName_diurno].dropna()
-    nocturno:DataFrame = receivers[sheetName_nocturno].dropna()
-    if not nocturno.size:
-        return diurno.set_index('Punto de medición (AUTOMÁTICO)')
-    return diurno.merge(nocturno,
-                        how='inner',
-                        on="Punto de medición (AUTOMÁTICO)"
-                        ).rename({"Memoria_x":"Diurno",
-                                    "Memoria_y":"Nocturno"},
-                                    axis=1
-                                    ).set_index("Punto de medición (AUTOMÁTICO)").rename_axis("Receivers")
-
 if get_ppv_values and calculate:
     std_df = DataFrame(columns=['X_STD', 'Y_STD', 'Z_STD'])
-    ppv_df = DataFrame(columns=['Start Time', 'X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']) 
+    summary_df = DataFrame(columns=['Start Time', 'X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']) 
     folder_name = None
     rion_objects:Dict[str, RIONVibrations] = {}
 
@@ -149,99 +138,90 @@ if get_ppv_values and calculate:
         receivers_path = get_receivers_path(uploaded_files)
         
     except FileNotFoundError as error:
-        import time
+        from time import sleep
         st.error('Receivers file not found, please try again')
         st.session_state.calculate_button_clicked = False
-        time.sleep(2)
+        sleep(2)
         st.rerun()
     
     baseline = BaseLine(receivers_path)
-    receivers_data = baseline.receivers
-      
+    receivers_baseline = baseline.receivers
+    receivers_baseline_copy =  receivers_baseline.copy()
+    
     for file in uploaded_files:
         file_name = file.name.split('_')
         if not folder_name:
             folder_name = file_name[0].split('/')[0]
         if 'Inst' in file_name:
             rion_file = RIONVibrations(file, baseline)
-            receiver = rion_file.receiver
-            print('----------------------------------------------------------------')
-            print(rion_file.file_number)
-            print(receiver)
-            print('----------------------------------------------------------------')
+            file_number = rion_file.file_number
             if rion_file == None:
                 continue
-            rion_objects[rion_file.receiver] = rion_file
-            ppv_df.loc[rion_file.file_number] = rion_file.summary.loc[rion_file.summary['PVS'].idxmax()]
+            rion_objects[file_number] = rion_file
+            summary_df.loc[file_number] = rion_file.summary.loc[rion_file.summary['PVS'].idxmax()]
 
-    all_files:Series = concat([receivers_data['Diurno'],
-                     receivers_data['Nocturno']])
-    all_files.name = 'Files'
-    arrays = list(zip([file.strip() for file in all_files.index.to_list()],
-                      all_files.values))
-    new_index = MultiIndex.from_tuples(arrays, names=['Receiver','File'])
-    ppv_df = ppv_df.rename(columns={'Start Time':'Measurement Time'}
+    n_files = [rion for rion in rion_objects]
+    not_receivers_founded = receivers_baseline_copy[receivers_baseline.isin(n_files)]
+    all_files:Series = concat([not_receivers_founded['Diurno'],
+                     not_receivers_founded['Nocturno']])
+    summary_df['Receivers'] = None
+    summary_df.loc[all_files[all_files.notna()], 'Receivers'] = all_files[all_files.notna()].index
+    summary_df = summary_df.rename(columns={'Start Time':'Measurement Time'}
                            ).rename_axis(
-                               'Receivers'
-                               ).sort_index()
-    ppv_df_no_format = ppv_df.copy()
-    ppv_df['Measurement Time'] = to_datetime(ppv_df['Measurement Time'])
-    ppv_df = ppv_df.set_index(new_index)  
+                               'File Number'
+                               )
+    summary_df['Measurement Time'] = to_datetime(summary_df['Measurement Time'])
 
-    if len(ppv_df)!=0:
-        with st.expander(f'Data calculated from {folder_name} folder', expanded=True):
-            st.dataframe(ppv_df, use_container_width=True)
-            #Maximum PVS value
-            max_pvs = ppv_df['PVS'].max()
+    with st.expander(f'Data calculated from {folder_name} folder', expanded=True):
+        st.dataframe(summary_df, use_container_width=True)
 
-        with st.expander("Details of a specific measurement"):
-
-            chart_selected = st.selectbox("Select a file to display the a chart with PPV values",
-                                        options=ppv_df.index.get_level_values(0).unique())
-            st.dataframe(ppv_df.loc[chart_selected], use_container_width=True)
-            
-            #Description of a measurement
-            #details_col1, detalis_col2 = st.columns()
-            reduce_outliers = st.toggle("Reduce Outliers", 
-                                       value=False, 
-                                       help="Replace the outliers values to the median value")
-            
-            if reduce_outliers:
-                dataframe = rion_objects[chart_selected].outliers_to_median
-                st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
-                             use_container_width=True)
-            else:
-                dataframe = rion_objects[chart_selected].summary
-                st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
-                             use_container_width=True)
-            
-            chart_type = st.selectbox("Select a type of chart", 
-                                      options=["Line", "Histogram", "Box"])
-            labels = ('Time, m/s')
-            if chart_type == "Histogram":
-                chart = histogram(dataframe,
-                                     x=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS'])
-            if chart_type == "Line":
-                chart = line(dataframe,
-                                x="Start Time",
-                                y=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']).update_layout(
-                                    xaxis_title = "Time [hh:mm]", 
-                                    yaxis_title = "Displacement [m/s]",
-                                    legend_title = "Metrics"
-                                )
-            if chart_type == "Box":
-                chart = box(dataframe,
-                               x=['PVS'])
-            #chart.update_yaxes(range=[0,max_pvs])
-            st.plotly_chart(chart, use_container_width=True)
-
-        st.download_button(
-            label="Download Summary",
-            data=export_data(ppv_df),
-            file_name="Vibration_summary.xlsx",
-            mime="application/vnd.ms-excel"
-        )
+    with st.expander("Details of a specific measurement"):
+        reduce_outliers = st.toggle("Reduce Outliers", 
+                                    value=False, 
+                                    help="Replace the outliers values to the median value")
+        chart_selected = st.selectbox("Select a file to display the a chart with PPV values",
+                                    options=summary_df.index)
+        rion_file = rion_objects[chart_selected]
+        if reduce_outliers:
+            rion_file.set_replace_outliers(True)
+            dataframe = rion_file.data
+            st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
+                            use_container_width=True)
+        else:
+            rion_file.set_replace_outliers(False)
+            dataframe = rion_file.data
+            st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
+                            use_container_width=True)
         
-        reset_button = st.button("Reset page")
-        if reset_button:
-            reset_page()
+        chart_type = st.selectbox("Select a type of chart", 
+                                    options=["Line", "Histogram", "Box"])
+        
+        labels = ('Time, m/s')
+        if chart_type == "Histogram":
+            chart = histogram(dataframe,
+                                    x=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS'])
+        if chart_type == "Line":
+            chart = line(dataframe,
+                            x="Start Time",
+                            y=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']).update_layout(
+                                xaxis_title = "Time [hh:mm]", 
+                                yaxis_title = "Displacement [m/s]",
+                                legend_title = "Metrics"
+                            )
+        if chart_type == "Box":
+            chart = box(dataframe,
+                            x=['PVS'])
+        #st.plotly_chart(chart, use_container_width=True)
+        col1, col2 = st.columns(2)
+        col1.plotly_chart(chart, use_container_width=True)
+
+    st.download_button(
+        label="Download Summary",
+        data=export_data(summary_df),
+        file_name="Vibration_summary.xlsx",
+        mime="application/vnd.ms-excel"
+    )
+    
+    reset_button = st.button("Reset page")
+    if reset_button:
+        reset_page()

@@ -78,12 +78,22 @@ class BaseLine:
             return self._receivers
         return self._receivers
         
+    @property
+    def receivers_as_dict(self):
+        return self.receivers['Diurno'].to_dict(), self.receivers['Nocturno'].to_dict()
+
     def find_receiver_from_fileNumber(self, fileNumber: int|str):
         try:
             idx = self.receivers.isin((fileNumber,))
             return self.receivers[idx].dropna(axis=0, how='all').index.values[0]    
         except IndexError:
             return None
+
+class Receiver:
+    def __init__(self,name:str):
+        self.name = name
+        self._day_file_number = None
+        self._night_file_number = None
 
 class VibrationLB:
     def __init__(self, base_line:BaseLine):

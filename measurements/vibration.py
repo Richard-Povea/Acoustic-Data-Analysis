@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from numpy import sqrt
 from pandas import DataFrame, Series, Timestamp, read_csv, to_datetime
 from re import search
-from typing import Literal
+from typing import Literal, Optional
 from data.data_management import outliers_to_median
 from documents.documents import BaseLine
 
@@ -16,6 +16,7 @@ class Vibrations(ABC):
         self.file_path = file_path
         self.baseline = baseline
         self._nonOutliersData = DataFrame()
+        self.replace_outliers = False
 
     @property
     def receiver(self):
@@ -32,8 +33,11 @@ class Vibrations(ABC):
             return 'Diurno'
         return 'Nocturno'
 
+    def set_replace_outliers(self, replace_outliers:bool):
+        self.replace_outliers = replace_outliers
+
     @property
-    def outliers_to_median(self):
+    def _outliers_to_median(self):
         """
         Replace outliers with median values for
 
@@ -84,6 +88,12 @@ class Vibrations(ABC):
         """
         pass
 
+    @property
+    def data(self)->DataFrame:
+        if self.replace_outliers:
+            return self._outliers_to_median
+        return self.process_data()
+
 class RIONVibrations(Vibrations):
 
     def __init__(self, file_path:str, baseline:BaseLine):
@@ -127,4 +137,3 @@ class SENTRYVibrations(Vibrations):
     def process_data(self):
         # Implementación específica para procesar datos de archivos SENTRY
         print("Processing SENTRY data...")
-
