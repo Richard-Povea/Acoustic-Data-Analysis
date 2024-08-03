@@ -3,7 +3,7 @@ from pandas import DataFrame, Series, to_datetime, concat
 from typing import Literal, Dict
 from data.data_management import export_data
 from measurements.vibration import RIONVibrations
-from documents.documents import get_receivers_path, BaseLine, FileNotFoundError
+from documents.documents import get_receivers_path, BaseLine, FileNotFoundError, NoFilesError
 from plotly.express import box, histogram, line
 from time import sleep
 
@@ -149,6 +149,12 @@ except FileNotFoundError as error:
     receivers_path = None
     baseline = None
     sleep(2)
+except NoFilesError as error:
+    st.error("No compatible files were uploaded.")
+    st.session_state.calculate_button_clicked = False
+    sleep(2)
+    st.rerun()
+
 #Read data from files
 for file in uploaded_files:
     file_name = file.name.split('_')

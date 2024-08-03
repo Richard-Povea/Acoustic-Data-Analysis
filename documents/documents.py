@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Literal, Optional, List
 from streamlit.runtime.uploaded_file_manager import UploadedFile
 
-class NotFilesError(Exception):
+class NoFilesError(Exception):
     pass
 class FileNotFoundError(Exception):
     pass
@@ -19,7 +19,7 @@ class SheetName(Enum):
 #Get the list of receivers from a excel file
 def get_receivers_path(uploaded_files:List[UploadedFile]|None):
     if not uploaded_files:
-        raise NotFilesError(f'No files were uploaded')
+        raise NoFilesError(f'No files were uploaded')
     receivers_path = [file for file in uploaded_files if file.name.endswith('.xlsx')]
     if receivers_path.__len__() == 0:
         raise FileNotFoundError('File with extension ".xlsx" cannot be found')
