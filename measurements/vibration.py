@@ -12,7 +12,7 @@ def get_receiver_name(file_number:str, receivers_data:DataFrame):
 
 class Vibrations(ABC):
     COLUMNS = ('Start Time', 'X_AP', 'Y_AP', 'Z_AP', 'PVS')
-    def __init__(self, file_path, baseline:BaseLine):
+    def __init__(self, file_path, baseline:Optional[BaseLine] = None):
         self.file_path = file_path
         self.baseline = baseline
         self._nonOutliersData = DataFrame()
@@ -20,6 +20,8 @@ class Vibrations(ABC):
 
     @property
     def receiver(self):
+        if self.baseline==None:
+            return None
         return self.baseline.find_receiver_from_fileNumber(self.file_number)
 
     @property
@@ -96,7 +98,7 @@ class Vibrations(ABC):
 
 class RIONVibrations(Vibrations):
 
-    def __init__(self, file_path:str, baseline:BaseLine):
+    def __init__(self, file_path:str, baseline:Optional[BaseLine]=None):
         super().__init__(file_path, baseline)
         self._data = self._load_data()
         self.summary = self.process_data()
