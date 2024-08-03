@@ -141,17 +141,15 @@ rion_objects:Dict[str, RIONVibrations] = {}
 #Get the list of receivers from a excel file
 try:
     receivers_path = get_receivers_path(uploaded_files)
-    
+    baseline = BaseLine(receivers_path)
+    receivers_baseline = baseline.receivers
+    receivers_baseline_copy = receivers_baseline.copy()
 except FileNotFoundError as error:
-    st.error('Receivers file not found, please try again')
-    st.session_state.calculate_button_clicked = False
+    st.warning('Receivers file not found')
+    receivers_path = None
+    baseline = None
     sleep(2)
-    st.rerun()
-
-baseline = BaseLine(receivers_path)
-receivers_baseline = baseline.receivers
-receivers_baseline_copy =  receivers_baseline.copy()
-
+#Read data from files
 for file in uploaded_files:
     file_name = file.name.split('_')
     if not folder_name:
@@ -163,18 +161,21 @@ for file in uploaded_files:
             continue
         rion_objects[file_number] = rion_file
         summary_df.loc[file_number] = rion_file.summary.loc[rion_file.summary['PVS'].idxmax()]
-st.session_state.uploaded_files = True
 n_files = [rion for rion in rion_objects]
 if len(n_files)==0:
     st.error("No compatible files were uploaded.")
     st.session_state.calculate_button_clicked = False
     sleep(2)
     st.rerun()
-not_receivers_founded = receivers_baseline_copy[receivers_baseline.isin(n_files)]
-all_files:Series = concat([not_receivers_founded['Diurno'],
-                    not_receivers_founded['Nocturno']])
-summary_df['Receivers'] = None
-summary_df.loc[all_files[all_files.notna()], 'Receivers'] = all_files[all_files.notna()].index
+st.session_state.uploaded_files = True
+
+if receivers_path is not None:
+    not_receivers_founded = receivers_baseline_copy[receivers_baseline.isin(n_files)]
+    all_files:Series = concat([not_receivers_founded['Diurno'],
+                        not_receivers_founded['Nocturno']])
+    summary_df['Receivers'] = None
+    summary_df.loc[all_files[all_files.notna()], 'Receivers'] = all_files[all_files.notna()].index
+
 summary_df = summary_df.rename(columns={'Start Time':'Measurement Time'}
                         ).rename_axis(
                             'File Number'
