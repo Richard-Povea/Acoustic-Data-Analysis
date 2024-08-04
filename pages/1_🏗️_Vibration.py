@@ -1,11 +1,12 @@
 import streamlit as st
-from pandas import DataFrame, read_excel, concat, MultiIndex, to_datetime
-from typing import Literal, Dict
-from data.vibration_data import RionFile
+from pandas import DataFrame, Series, to_datetime, concat
+from typing import Literal, Optional, Dict
 from data.data_management import export_data
+from measurements.vibration import RIONVibrations
+from documents.documents import get_receivers_path, BaseLine, FileNotFoundError, NoFilesError
 from plotly.express import box, histogram, line
+from time import sleep
 
-PROCESSING = False
 HELP_PPV_CHECKER = """
     The ppv value of vibration data in "AP" column is calculated for each axis.
     PPV get the maximum value of data for each axis."""
@@ -14,18 +15,19 @@ HELP_FREQ_CHECKER = """
 This option is not available yet."""
 
 if 'calculate_button_clicked' not in st.session_state:
-    st.session_state.calculate_button_clicked = False
+    st.session_state['calculate_button_clicked'] = False
 if 'get_ppv_values' not in st.session_state:
     st.session_state.get_ppv_values = False
-if 'get_freq_values' not in st.session_state:
-    st.session_state.get_freq_values = False
+if 'uploaded_files' not in st.session_state:
+    st.session_state.uploaded_files = False
+if 'receivers_file' not in st.session_state:
+    st.session_state.receivers_file = False
+
 
 def process_data():
-    st.session_state.calculate_button_clicked = not st.session_state.calculate_button_clicked
+    st.session_state['calculate_button_clicked'] = not st.session_state['calculate_button_clicked']
 def get_ppv_values_callback():
     st.session_state.get_ppv_values = not st.session_state.get_ppv_values
-def get_freq_values_callback():
-    st.session_state.get_freq_values = not st.session_state.get_freq_values
 def get_values_checkbox(type:Literal['ppv', 'freq'], 
                       key:int, 
                       value:bool=False, 
@@ -38,16 +40,18 @@ def get_values_checkbox(type:Literal['ppv', 'freq'],
                     key=key,
                     disabled=disabled,
                     help=help)
-    if type == 'freq':
-        return st.checkbox('Get Freq Values',
-                    value=value,
-                    on_change=get_freq_values_callback,
-                    key=key,
-                    disabled=disabled,
-                    help=help)
  
+def reset_page():
+    uploaded_files.clear()
+    st.cache_resource.clear()
+    st.cache_data.clear()
+    st.session_state['calculate_button_clicked'] = False
+    st.session_state['uploaded_files'] =False
+    st.rerun()
 
-st.set_page_config(page_title="Vibration Analysis", page_icon="🏗️")
+st.set_page_config(page_title="Vibration Analysis", 
+                   page_icon="🏗️",
+                   layout="wide")
 st.markdown("# Vibration Analysis")
 sidebar = st.sidebar
 
@@ -78,183 +82,179 @@ with st.expander('Example of folder'):
 #Side bar
 uploaded_files = sidebar.file_uploader(
     "Choose a CSV file or drag and drop a folder with all data.", 
-    accept_multiple_files=True)
+    accept_multiple_files=True,
+    disabled=st.session_state.get('uploaded_files'))
+
 
 #Inputs to read the excel file
 input_container = sidebar.container(border=True)
 sheetName_diurno = input_container.text_input('SheetName diurno',
                                         value="VIBRACIÓN - Diurno",
-                                        disabled=st.session_state.calculate_button_clicked)
+                                        disabled=st.session_state['calculate_button_clicked'])
 sheetName_nocturno = input_container.text_input('SheetName nocturno',
                                         value="VIBRACIÓN - Nocturno",
-                                        disabled=st.session_state.calculate_button_clicked)
+                                        disabled=st.session_state['calculate_button_clicked'])
 col1, col2 = input_container.columns(2)
 
 receivers_col = col1.text_input('Receivers column', 
                                 value="A",
-                                disabled=st.session_state.calculate_button_clicked)
+                                disabled=st.session_state['calculate_button_clicked'])
 memories_col = col2.text_input('Memories column', 
                                value="E",
-                               disabled=st.session_state.calculate_button_clicked)
+                               disabled=st.session_state['calculate_button_clicked'])
 
 #Options to process files
 st.markdown('### Select the process you want to upload')
 options = st.container(border=True)
    
 with options:
-    check_options = (st.session_state.get_ppv_values or st.session_state.get_freq_values) 
     #Verificar si no hay seleccionada una opcion, o 
-    if (not (st.session_state.get_ppv_values or st.session_state.get_freq_values) 
-        or not uploaded_files):
+    if (not (st.session_state.get_ppv_values) or not uploaded_files):
         get_ppv_values = get_values_checkbox('ppv', 
                                               key=1,
                                               help=HELP_PPV_CHECKER)
-        get_freq_values = get_values_checkbox('freq', 
-                                              key=2,
-                                              disabled=True)
         calculate = options.button('Go Calculate!', disabled=True)
-    elif not st.session_state.calculate_button_clicked:
+    elif not st.session_state['calculate_button_clicked']:
         get_ppv_values = get_values_checkbox('ppv', 
                                               key=3, 
                                               value=st.session_state.get_ppv_values,
                                               help=HELP_PPV_CHECKER)
-        get_freq_values = get_values_checkbox('freq', 
-                                              key=4, 
-                                              value=st.session_state.get_freq_values,
-                                              disabled=True)
         calculate = options.button('Go Calculate!', 
                                    disabled=False, 
                                    on_click=process_data)
-    else:
+    elif st.session_state['calculate_button_clicked']:
         get_ppv_values = get_values_checkbox('ppv', 
                                               key=3, 
                                               value=st.session_state.get_ppv_values, 
                                               disabled=True)
-        get_freq_values = get_values_checkbox('freq', 
-                                              key=4, 
-                                              value=st.session_state.get_freq_values, 
-                                              disabled=True)
         calculate = options.button('Go Calculate!', disabled=True)
 
 get_ppv_values = st.session_state.get_ppv_values
-get_freq_values = st.session_state.get_freq_values
-calculate = st.session_state.calculate_button_clicked
+calculate = st.session_state['calculate_button_clicked']
 
-if get_ppv_values and calculate:
-    std_df = DataFrame(columns=['X_STD', 'Y_STD', 'Z_STD'])
-    ppv_df = DataFrame(columns=['Start Time', 'X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']) 
-    folder_name = None
-    rion_objects:Dict[str, RionFile] = {}
+if not(get_ppv_values and calculate):
+    st.warning('Please upload files')
+    st.stop()    
 
-    #Get the list of receivers from a excel file
-    receivers_path = [file for file in uploaded_files if file.name.split('.')[-1] == 'xlsx'][0]
-    receivers:dict = read_excel(receivers_path,
-                               sheet_name=[sheetName_diurno, sheetName_nocturno],
-                               usecols="{},{}".format(receivers_col,
-                                                      memories_col))
+std_df = DataFrame(columns=['X_STD', 'Y_STD', 'Z_STD'])
+rion_objects:Dict[str, RIONVibrations] = {}
 
-    def excel_data(receivers:dict)->DataFrame:
-        diurno:DataFrame = receivers[sheetName_diurno].dropna()
-        nocturno:DataFrame = receivers[sheetName_nocturno].dropna()
-        if not nocturno.size:
-            return diurno.set_index('Punto de medición (AUTOMÁTICO)')
-        return diurno.merge(nocturno,
-                            how='inner',
-                            on="Punto de medición (AUTOMÁTICO)"
-                            ).rename({"Memoria_x":"Diurno",
-                                      "Memoria_y":"Nocturno"},
-                                      axis=1
-                                      ).set_index("Punto de medición (AUTOMÁTICO)").rename_axis("Receivers")
-    receivers_data = excel_data(receivers)
-    receivers_data['Diurno'] = receivers_data['Diurno'].apply(lambda x: str(int(x)).zfill(4))
-    receivers_data['Nocturno'] = receivers_data['Nocturno'].apply(lambda x: str(int(x)).zfill(4))
-    with st.expander("See the receivers and memories list", expanded=False):
-        st.dataframe(receivers_data, use_container_width=True)
+#Get the list of receivers from a excel file
+@st.cache_data
+def get_receivers_data(uploaded_files):
+    receivers_path = get_receivers_path(uploaded_files)
+    baseline = BaseLine(receivers_path)
+    return baseline
 
+try:
+    baseline = get_receivers_data(uploaded_files)
+except FileNotFoundError as error:
+    st.warning('Receivers file not found')
+    receivers_path = None
+    baseline = None
+    sleep(2)
+except NoFilesError as error:
+    if not st.session_state.get('uploaded_files'):
+        st.error("No compatible files were uploaded.")
+        st.session_state['calculate_button_clicked'] = False
+        sleep(2)
+        st.rerun()
+
+#Read data from files
+def get_summary_df(uploaded_files, baseline:Optional[BaseLine]):
+    summary = DataFrame(columns=['Start Time', 'X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']) 
     for file in uploaded_files:
         file_name = file.name.split('_')
-        if not folder_name:
-            folder_name = file_name[0].split('/')[0]
-        if 'Inst' in file_name:
-            rion_file = RionFile(file)
-            name = rion_file.file_name
-            rion_objects[name] = rion_file
-            ppv = rion_file.summary
-            ppv_df.loc[name] = ppv
-    st.dataframe(receivers_data)
-    st.write(receivers_data['Diurno'])
-    st.write(receivers_data['Nocturno'])
-    all_files = concat([receivers_data['Diurno'],
-                     receivers_data['Nocturno']])
-    all_files.name = 'Files'
-    st.write(all_files)
-    arrays = list(zip(all_files.index.to_list(),
-                      all_files.values))
-    new_index = MultiIndex.from_tuples(arrays, names=['Receiver','File'])
-    ppv_df = ppv_df.rename(columns={'Start Time':'Measurement Time'}
-                           ).rename_axis(
-                               'Receivers'
-                               ).sort_index()
-    ppv_df['Measurement Time'] = to_datetime(ppv_df['Measurement Time'])
-    ppv_df = ppv_df.set_index(new_index)
-    st.dataframe(ppv_df, use_container_width=True)   
+        if 'Inst' not in file_name:
+            continue
+        rion_file = RIONVibrations(file, baseline)
+        file_number = rion_file.file_number
+        if rion_file == None:
+            continue
+        rion_objects[file_number] = rion_file
+        summary.loc[file_number] = rion_file.summary.loc[rion_file.summary['PVS'].idxmax()]
+    return summary
 
-    if len(ppv_df)!=0:
-        with st.expander(f'Data calculated from {folder_name} folder', expanded=True):
-            st.dataframe(ppv_df, use_container_width=True)
-            #Maximum PVS value
-            max_pvs = ppv_df['PVS'].max()
+summary_df = st.session_state.get('summary_df', None)
+if summary_df is None:
+    summary_df = get_summary_df(uploaded_files, baseline)
+    st.session_state['summary_df'] = summary_df
+    st.session_state['rion_objects'] = rion_objects
+    st.session_state['baseline'] = baseline
+rion_objects = st.session_state.get('rion_objects', None)
+baseline = st.session_state.get('baseline', None)
 
-        with st.expander("Details of a specific measurement"):
+n_files = [rion for rion in rion_objects]
+if len(n_files)==0:
+    st.error("No compatible files were uploaded.")
+    st.session_state['calculate_button_clicked'] = False
+    sleep(2)
+    st.rerun()
+st.session_state['uploaded_files'] = True
+if baseline is not None:
+    receivers_baseline = baseline.receivers
+    not_receivers_founded = receivers_baseline[receivers_baseline.isin(n_files)]
+    all_files:Series = concat([not_receivers_founded['Diurno'],
+                        not_receivers_founded['Nocturno']])
+    summary_df['Receivers'] = None
+    summary_df.loc[all_files[all_files.notna()], 'Receivers'] = all_files[all_files.notna()].index
 
-            chart_selected = st.selectbox("Select a file to display the a chart with PPV values",
-                                        options=ppv_df.index)
-            chart_selected = names_files_dict.get(chart_selected)
-            
-            #Description of a measurement
-            #details_col1, detalis_col2 = st.columns()
-            reduce_outliers = st.toggle("Reduce Outliers", 
-                                       value=False, 
-                                       help="Replace the outliers values to the median value")
-            
-            if reduce_outliers:
-                dataframe = rion_objects[chart_selected].outliers_to_median
-                st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
-                             use_container_width=True)
-            else:
-                dataframe = rion_objects[chart_selected].ppv()
-                st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
-                             use_container_width=True)
-            
-            chart_type = st.selectbox("Select a type of chart", 
-                                      options=["Line", "Histogram", "Box"])
-            labels = ('Time, m/s')
-            if chart_type == "Histogram":
-                chart = histogram(dataframe,
-                                     x=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS'])
-            if chart_type == "Line":
-                chart = line(dataframe,
-                                x="Start Time",
-                                y=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']).update_layout(
-                                    xaxis_title = "Time [hh:mm]", 
-                                    yaxis_title = "Displacement [m/s]",
-                                    legend_title = "Metrics"
-                                )
-            if chart_type == "Box":
-                chart = box(dataframe,
-                               x=['PVS'])
-            #chart.update_yaxes(range=[0,max_pvs])
-            st.plotly_chart(chart, use_container_width=True)
+summary_df = summary_df.rename(columns={'Start Time':'Measurement Time'}
+                        ).rename_axis(
+                            'File Number'
+                            )
+summary_df['Measurement Time'] = to_datetime(summary_df['Measurement Time'])
 
-        st.download_button(
-            label="Download the Summary",
-            data=export_data(ppv_df),
-            file_name="Vibration_summary.xlsx",
-            mime="application/vnd.ms-excel"
-        )
-        
-        reset_button = st.button("Reset page")
-        if reset_button:
-            ppv_df = None
-            uploaded_files = None
-            st.session_state.calculate_button_clicked = False
+with st.expander(f'Data calculated', expanded=True):
+    st.dataframe(summary_df, use_container_width=True)
+
+with st.expander("Details of a specific measurement"):
+    reduce_outliers = st.toggle("Reduce Outliers", 
+                                value=False, 
+                                help="Replace the outliers values to the median value")
+    chart_selected = st.selectbox("Select a file to display the a chart with PPV values",
+                                options=summary_df.index)
+    rion_file = rion_objects[chart_selected]
+    if reduce_outliers:
+        rion_file.set_replace_outliers(True)
+        dataframe = rion_file.data
+        st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
+                        use_container_width=True)
+    else:
+        rion_file.set_replace_outliers(False)
+        dataframe = rion_file.data
+        st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
+                        use_container_width=True)
+    
+    chart_type = st.selectbox("Select a type of chart", 
+                                options=["Line", "Histogram", "Box"])
+    
+    labels = ('Time, m/s')
+    if chart_type == "Histogram":
+        chart = histogram(dataframe,
+                                x=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS'])
+    if chart_type == "Line":
+        chart = line(dataframe,
+                        x="Start Time",
+                        y=['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']).update_layout(
+                            xaxis_title = "Time [hh:mm]", 
+                            yaxis_title = "Displacement [m/s]",
+                            legend_title = "Metrics"
+                        )
+    if chart_type == "Box":
+        chart = box(dataframe,
+                        x=['PVS'])
+    #st.plotly_chart(chart, use_container_width=True)
+    col1, col2 = st.columns(2)
+    col1.plotly_chart(chart, use_container_width=True)
+
+st.download_button(
+    label="Download Summary",
+    data=export_data(summary_df),
+    file_name="Vibration_summary.xlsx",
+    mime="application/vnd.ms-excel"
+)
+
+reset_button = st.button("Reset page")
+if reset_button:
+    reset_page()

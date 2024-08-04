@@ -17,15 +17,18 @@ def get_outliers(data:Series, k_factor:int=1.5)->Series:
     return outliers
 
 def outliers_to_median(data:Series, outliers:Series=None)->Series:
-    if not outliers:
+    if outliers is None:
         outliers = get_outliers(data)
     median = data.median()
-    data.loc[outliers.index] = median
-    return data
+    # Asegúrate de que outliers es una Serie de booleanos con el mismo índice que data
+    if not isinstance(outliers, Series):
+        raise ValueError("Outliers must be a boolean Series.")
+    data_copy = data.copy()
+    data_copy.loc[outliers.index] = median
+    return data_copy
 
 def export_data(df:DataFrame):
     buffer = BytesIO()
     with ExcelWriter(buffer, engine='xlsxwriter') as writer:
         df.to_excel(writer, sheet_name='Vibration Summary')
-        writer.close()
     return buffer

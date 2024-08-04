@@ -2,7 +2,7 @@ import streamlit as st
 
 st.set_page_config(
     page_title="Acoustic Data Analysis",
-    page_icon="🔊",
+    page_icon="🔊"
 )
 st.title('Acoustic Data Analysis')
 st.write(
