@@ -1,6 +1,6 @@
 import streamlit as st
 from pandas import DataFrame, Series, to_datetime, concat
-from typing import Literal, Dict
+from typing import Literal, Optional, Dict
 from data.data_management import export_data
 from measurements.vibration import RIONVibrations
 from documents.documents import get_receivers_path, BaseLine, FileNotFoundError, NoFilesError
@@ -15,7 +15,7 @@ HELP_FREQ_CHECKER = """
 This option is not available yet."""
 
 if 'calculate_button_clicked' not in st.session_state:
-    st.session_state.calculate_button_clicked = False
+    st.session_state['calculate_button_clicked'] = False
 if 'get_ppv_values' not in st.session_state:
     st.session_state.get_ppv_values = False
 if 'uploaded_files' not in st.session_state:
@@ -25,7 +25,7 @@ if 'receivers_file' not in st.session_state:
 
 
 def process_data():
-    st.session_state.calculate_button_clicked = not st.session_state.calculate_button_clicked
+    st.session_state['calculate_button_clicked'] = not st.session_state['calculate_button_clicked']
 def get_ppv_values_callback():
     st.session_state.get_ppv_values = not st.session_state.get_ppv_values
 def get_values_checkbox(type:Literal['ppv', 'freq'], 
@@ -45,7 +45,8 @@ def reset_page():
     uploaded_files.clear()
     st.cache_resource.clear()
     st.cache_data.clear()
-    st.session_state.calculate_button_clicked = False
+    st.session_state['calculate_button_clicked'] = False
+    st.session_state['uploaded_files'] =False
     st.rerun()
 
 st.set_page_config(page_title="Vibration Analysis", 
@@ -81,24 +82,26 @@ with st.expander('Example of folder'):
 #Side bar
 uploaded_files = sidebar.file_uploader(
     "Choose a CSV file or drag and drop a folder with all data.", 
-    accept_multiple_files=True)
+    accept_multiple_files=True,
+    disabled=st.session_state.get('uploaded_files'))
+
 
 #Inputs to read the excel file
 input_container = sidebar.container(border=True)
 sheetName_diurno = input_container.text_input('SheetName diurno',
                                         value="VIBRACIÓN - Diurno",
-                                        disabled=st.session_state.calculate_button_clicked)
+                                        disabled=st.session_state['calculate_button_clicked'])
 sheetName_nocturno = input_container.text_input('SheetName nocturno',
                                         value="VIBRACIÓN - Nocturno",
-                                        disabled=st.session_state.calculate_button_clicked)
+                                        disabled=st.session_state['calculate_button_clicked'])
 col1, col2 = input_container.columns(2)
 
 receivers_col = col1.text_input('Receivers column', 
                                 value="A",
-                                disabled=st.session_state.calculate_button_clicked)
+                                disabled=st.session_state['calculate_button_clicked'])
 memories_col = col2.text_input('Memories column', 
                                value="E",
-                               disabled=st.session_state.calculate_button_clicked)
+                               disabled=st.session_state['calculate_button_clicked'])
 
 #Options to process files
 st.markdown('### Select the process you want to upload')
@@ -111,7 +114,7 @@ with options:
                                               key=1,
                                               help=HELP_PPV_CHECKER)
         calculate = options.button('Go Calculate!', disabled=True)
-    elif not st.session_state.calculate_button_clicked:
+    elif not st.session_state['calculate_button_clicked']:
         get_ppv_values = get_values_checkbox('ppv', 
                                               key=3, 
                                               value=st.session_state.get_ppv_values,
@@ -119,7 +122,7 @@ with options:
         calculate = options.button('Go Calculate!', 
                                    disabled=False, 
                                    on_click=process_data)
-    elif st.session_state.calculate_button_clicked:
+    elif st.session_state['calculate_button_clicked']:
         get_ppv_values = get_values_checkbox('ppv', 
                                               key=3, 
                                               value=st.session_state.get_ppv_values, 
@@ -127,56 +130,70 @@ with options:
         calculate = options.button('Go Calculate!', disabled=True)
 
 get_ppv_values = st.session_state.get_ppv_values
-calculate = st.session_state.calculate_button_clicked
+calculate = st.session_state['calculate_button_clicked']
 
 if not(get_ppv_values and calculate):
     st.warning('Please upload files')
     st.stop()    
 
 std_df = DataFrame(columns=['X_STD', 'Y_STD', 'Z_STD'])
-summary_df = DataFrame(columns=['Start Time', 'X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']) 
-folder_name = None
 rion_objects:Dict[str, RIONVibrations] = {}
 
 #Get the list of receivers from a excel file
-try:
+@st.cache_data
+def get_receivers_data(uploaded_files):
     receivers_path = get_receivers_path(uploaded_files)
     baseline = BaseLine(receivers_path)
-    receivers_baseline = baseline.receivers
-    receivers_baseline_copy = receivers_baseline.copy()
+    return baseline
+
+try:
+    baseline = get_receivers_data(uploaded_files)
 except FileNotFoundError as error:
     st.warning('Receivers file not found')
     receivers_path = None
     baseline = None
     sleep(2)
 except NoFilesError as error:
-    st.error("No compatible files were uploaded.")
-    st.session_state.calculate_button_clicked = False
-    sleep(2)
-    st.rerun()
+    if not st.session_state.get('uploaded_files'):
+        st.error("No compatible files were uploaded.")
+        st.session_state['calculate_button_clicked'] = False
+        sleep(2)
+        st.rerun()
 
 #Read data from files
-for file in uploaded_files:
-    file_name = file.name.split('_')
-    if not folder_name:
-        folder_name = file_name[0].split('/')[0]
-    if 'Inst' in file_name:
+def get_summary_df(uploaded_files, baseline:Optional[BaseLine]):
+    summary = DataFrame(columns=['Start Time', 'X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']) 
+    for file in uploaded_files:
+        file_name = file.name.split('_')
+        if 'Inst' not in file_name:
+            continue
         rion_file = RIONVibrations(file, baseline)
         file_number = rion_file.file_number
         if rion_file == None:
             continue
         rion_objects[file_number] = rion_file
-        summary_df.loc[file_number] = rion_file.summary.loc[rion_file.summary['PVS'].idxmax()]
+        summary.loc[file_number] = rion_file.summary.loc[rion_file.summary['PVS'].idxmax()]
+    return summary
+
+summary_df = st.session_state.get('summary_df', None)
+if summary_df is None:
+    summary_df = get_summary_df(uploaded_files, baseline)
+    st.session_state['summary_df'] = summary_df
+    st.session_state['rion_objects'] = rion_objects
+    st.session_state['baseline'] = baseline
+rion_objects = st.session_state.get('rion_objects', None)
+baseline = st.session_state.get('baseline', None)
+
 n_files = [rion for rion in rion_objects]
 if len(n_files)==0:
     st.error("No compatible files were uploaded.")
-    st.session_state.calculate_button_clicked = False
+    st.session_state['calculate_button_clicked'] = False
     sleep(2)
     st.rerun()
-st.session_state.uploaded_files = True
-
-if receivers_path is not None:
-    not_receivers_founded = receivers_baseline_copy[receivers_baseline.isin(n_files)]
+st.session_state['uploaded_files'] = True
+if baseline is not None:
+    receivers_baseline = baseline.receivers
+    not_receivers_founded = receivers_baseline[receivers_baseline.isin(n_files)]
     all_files:Series = concat([not_receivers_founded['Diurno'],
                         not_receivers_founded['Nocturno']])
     summary_df['Receivers'] = None
@@ -188,7 +205,7 @@ summary_df = summary_df.rename(columns={'Start Time':'Measurement Time'}
                             )
 summary_df['Measurement Time'] = to_datetime(summary_df['Measurement Time'])
 
-with st.expander(f'Data calculated from {folder_name} folder', expanded=True):
+with st.expander(f'Data calculated', expanded=True):
     st.dataframe(summary_df, use_container_width=True)
 
 with st.expander("Details of a specific measurement"):
