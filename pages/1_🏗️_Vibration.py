@@ -161,9 +161,12 @@ except NoFilesError as error:
         st.rerun()
 
 #Read data from files
-def get_summary_df(uploaded_files, baseline:Optional[BaseLine]):
+def get_summary_df(uploaded_files,
+                   baseline:Optional[BaseLine]=None,
+                   replace_outliers:Optional[bool]=False):
     summary = DataFrame(columns=['Start Time', 'X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']) 
     for file in uploaded_files:
+        file.seek(0)
         file_name = file.name.split('_')
         if 'Inst' not in file_name:
             continue
@@ -171,16 +174,24 @@ def get_summary_df(uploaded_files, baseline:Optional[BaseLine]):
         file_number = rion_file.file_number
         if rion_file == None:
             continue
+        rion_file.set_replace_outliers(replace_outliers)
         rion_objects[file_number] = rion_file
-        summary.loc[file_number] = rion_file.summary.loc[rion_file.summary['PVS'].idxmax()]
+        summary.loc[file_number] = rion_file.data.loc[rion_file.data['PVS'].idxmax()]
     return summary
 
 summary_df = st.session_state.get('summary_df', None)
 if summary_df is None:
-    summary_df = get_summary_df(uploaded_files, baseline)
+    summary_df = get_summary_df(uploaded_files=uploaded_files,
+                                baseline=baseline,
+                                replace_outliers=False)
+    summary_df_non_outliers = get_summary_df(uploaded_files=uploaded_files,
+                                baseline=baseline,
+                                replace_outliers=True)
     st.session_state['summary_df'] = summary_df
+    st.session_state['summary_df_non_outliers'] = summary_df_non_outliers
     st.session_state['rion_objects'] = rion_objects
     st.session_state['baseline'] = baseline
+summary_df_non_outliers = st.session_state.get('summary_df_non_outliers', None)
 rion_objects = st.session_state.get('rion_objects', None)
 baseline = st.session_state.get('baseline', None)
 
@@ -212,19 +223,31 @@ with st.expander("Details of a specific measurement"):
     reduce_outliers = st.toggle("Reduce Outliers", 
                                 value=False, 
                                 help="Replace the outliers values to the median value")
+    st.session_state['reduce_outliers'] = reduce_outliers
     chart_selected = st.selectbox("Select a file to display the a chart with PPV values",
                                 options=summary_df.index)
     rion_file = rion_objects[chart_selected]
     if reduce_outliers:
-        rion_file.set_replace_outliers(True)
-        dataframe = rion_file.data
+        dataframe = st.session_state.get('non_outliers_data', None)
+        if not isinstance(dataframe, DataFrame):
+            rion_file.set_replace_outliers(True)
+            dataframe = rion_file.data
+            st.session_state['non_outliers_data'] = dataframe
+            st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T),
+                         use_container_width=True)
         st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
                         use_container_width=True)
     else:
-        rion_file.set_replace_outliers(False)
-        dataframe = rion_file.data
-        st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
-                        use_container_width=True)
+        dataframe = st.session_state.get('original_data', None)
+        if not isinstance(dataframe, DataFrame):
+            rion_file.set_replace_outliers(False)
+            dataframe = rion_file.data
+            st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T),
+                         use_container_width=True)
+            st.session_state['original_data'] = dataframe
+        else:
+            st.dataframe(DataFrame(dataframe[['X_PPV', 'Y_PPV', 'Z_PPV', 'PVS']].describe().T), 
+                            use_container_width=True)
     
     chart_type = st.selectbox("Select a type of chart", 
                                 options=["Line", "Histogram", "Box"])
@@ -248,9 +271,18 @@ with st.expander("Details of a specific measurement"):
     col1, col2 = st.columns(2)
     col1.plotly_chart(chart, use_container_width=True)
 
+def export_summary():
+    reduce_outliers = st.session_state['reduce_outliers']
+    if reduce_outliers:
+        dataframe = st.session_state.get('summary_df_non_outliers')
+    else:
+        dataframe = st.session_state.get('summary_df')
+    return export_data(dataframe)
+
+
 st.download_button(
     label="Download Summary",
-    data=export_data(summary_df),
+    data=export_summary(),
     file_name="Vibration_summary.xlsx",
     mime="application/vnd.ms-excel"
 )
