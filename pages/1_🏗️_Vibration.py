@@ -2,10 +2,26 @@ import streamlit as st
 from pandas import DataFrame, Series, to_datetime, concat
 from typing import Literal, Optional, Dict
 from data.data_management import export_data
-from measurements.vibration import RIONVibrations
+from measurements.vibration import RionVibration
 from documents.documents import get_receivers_path, BaseLine, FileNotFoundError, NoFilesError
 from plotly.express import box, histogram, line
 from time import sleep
+from tomllib import load
+from pathlib import Path
+try:
+    path = Path("params.toml")
+except ImportError:
+    raise ImportError("Error loading params.toml")
+
+with open(path, "rb") as f:
+    params = load(f)
+    debug = params['debugger']['debug']
+    path = params['debugger']['path']
+    
+if debug:
+    example = RionVibration(data_path=path)
+    st.write(example.summary.pvs_by_interval())
+    st.stop()
 
 HELP_PPV_CHECKER = """
     The ppv value of vibration data in "AP" column is calculated for each axis.
@@ -136,7 +152,6 @@ if not(get_ppv_values and calculate):
     st.warning('Please upload files')
     st.stop()    
 
-std_df = DataFrame(columns=['X_STD', 'Y_STD', 'Z_STD'])
 rion_objects:Dict[str, RIONVibrations] = {}
 
 #Get the list of receivers from a excel file

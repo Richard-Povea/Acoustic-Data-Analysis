@@ -1,137 +1,252 @@
 from abc import ABC, abstractmethod
 from numpy import sqrt
-from pandas import DataFrame, Series, Timestamp, read_csv, to_datetime
+from pandas import DataFrame, read_csv, to_datetime
 from re import search
-from typing import Literal, Optional
+from typing import Optional, List
 from data.data_management import outliers_to_median
 from documents.documents import BaseLine
+from enum import Enum
 
-def get_receiver_name(file_number:str, receivers_data:DataFrame):
-        idx = receivers_data.isin((file_number,))
-        return receivers_data[idx].dropna(axis=0, how='all').index.values[0]
+class Axis(Enum):
+    x_axis = 'X'
+    y_axis = 'Y'
+    z_axis = 'Z'
+    pvs_axis = 'PVS'
 
-class Vibrations(ABC):
-    COLUMNS = ('Start Time', 'X_AP', 'Y_AP', 'Z_AP', 'PVS')
-    def __init__(self, file_path, baseline:Optional[BaseLine] = None):
-        self.file_path = file_path
-        self.baseline = baseline
-        self._nonOutliersData = DataFrame()
-        self.replace_outliers = False
+class DataType(Enum):
+    rion = 'Rion'
 
-    @property
-    def receiver(self):
-        if self.baseline==None:
-            return None
-        return self.baseline.find_receiver_from_fileNumber(self.file_number)
-
-    @property
-    def start_time(self)->Timestamp:
-        return self.process_data()['Start Time'].min()
-    
-    @property
-    def period(self)->str:
-        hour = self.start_time.hour
-        if 7<hour and hour<21:
-            return 'Diurno'
-        return 'Nocturno'
-
-    def set_replace_outliers(self, replace_outliers:bool):
-        self.replace_outliers = replace_outliers
-
-    @property
-    def _outliers_to_median(self):
-        """
-        Replace outliers with median values for
-
-        Returns:
-            _type_: DataFrame with outliers replaced by median values
-        """
-        if not self._nonOutliersData.empty:
-            return self._nonOutliersData
-        non_outliers = self.process_data()
-        non_outliers['X_PPV'] = outliers_to_median(data=non_outliers['X_PPV'])
-        non_outliers['Y_PPV'] = outliers_to_median(data=non_outliers['Y_PPV'])
-        non_outliers['Z_PPV'] = outliers_to_median(data=non_outliers['Z_PPV'])
-        non_outliers['PVS'] = outliers_to_median(data=non_outliers['PVS'])
-        self._nonOutliersData = non_outliers
-        return non_outliers
-    
-    @property
-    def max_pvs(self)->Series:
-        """
-
-        Returns:
-            _type_: Series with the maximum value of the measurement.
-        """
-        ppvs = self.process_data()
-        max_pvs = ppvs['PVS'].idxmax()
-        return max_pvs
-
-    @property
+class FormatData(ABC):
     @abstractmethod
-    def file_number(self):
-        """ Return the file number of the Vibrations object. """
-        pass
-
-    @abstractmethod
-    def _load_data(self):
-        """Método abstracto para cargar datos."""
-        pass
-
-    @abstractmethod
-    def process_data(self)->DataFrame:
+    def formatted_data(self,
+                       weighted:Optional[bool]=True
+                       )->DataFrame:
         """ 
-        Returns a DataFrame representation of the measurement data. 
+        Returns a DataFrame representation of measurement data. 
 
-        Columns are 'Start Time', 'X_AP', 'Y_AP', 'Z_AP' and 'PVS'
+        Columns are 'Start Time', 'X', 'Y', 'Z' and 'PVS'
 
         Returns:
             _type_: DataFrame
         """
         pass
 
+class RionFormatter(FormatData):
+    def __init__(self, data:DataFrame):
+        self._data = data
+
+    def formatted_data(
+            self,
+            weighted:Optional[bool]=True
+            ) -> DataFrame:
+        if weighted:
+            axis = {
+                'X':'X_APW',
+                'Y':'Y_APW',
+                'Z':'Z_APW'
+            }
+        else:
+            axis = {
+                'X':'X_AP',
+                'Y':'Y_AP',
+                'Z':'Z_AP'
+                }
+        data = self._data.copy()
+        data['PVS'] = sqrt(data[axis['X']]**2 + 
+                           data[axis['Y']]**2 + 
+                           data[axis['Z']]**2)
+        return data[['Start Time',
+                     axis['X'],
+                     axis['Y'],
+                     axis['Z'],
+                     'PVS']].rename(
+                         columns={
+                             axis['X']:'X',
+                             axis['Y']:'Y',
+                             axis['Z']:'Z',
+                         }
+                     )
+
+    def __frequencies(self):
+        #Implement this method to get frequency values
+        pass
+
+class MeasurementInfo(ABC):
+    @abstractmethod
+    def start_time():
+        pass
+    @abstractmethod
+    def end_time():
+        pass
+    @abstractmethod
+    def measurement_length():
+        pass
+
+class RionMeasurementInfo(MeasurementInfo):
+    def __init__(self, data:DataFrame) -> None:
+        self._data = data
+
     @property
-    def data(self)->DataFrame:
-        if self.replace_outliers:
-            return self._outliers_to_median
-        return self.process_data()
-
-class RIONVibrations(Vibrations):
-
-    def __init__(self, file_path:str, baseline:Optional[BaseLine]=None):
-        super().__init__(file_path, baseline)
-        self._data = self._load_data()
-        self.summary = self.process_data()
+    def start_time(self):
+        return self._data['Start Time'].min()
+    
     @property
-    def file_number(self):
-        return str(search(r'_(\d){4}_', self.file_path.name).group()[1:-1])
+    def end_time(self):
+        return self._data['Start Time'].max()
 
-    def _load_data(self)->DataFrame:
-        # Implementación específica para cargar datos de archivos RION
-        data = read_csv(self.file_path, 
-                        skiprows=1)
-        data['Start Time'] = to_datetime(data['Start Time'],
-                                 yearfirst=True)
+    @property
+    def measurement_length(self): 
+        return self.end_time() - self.start_time()
+
+class Summary:
+    def __init__(self, 
+                 formatted_data:FormatData,
+                 interval:Optional[int]=1):
+        self._data = formatted_data.formatted_data()
+        self._non_outliers_data = None
+        self.interval = interval
+
+    def _non_outliers_axis(self,
+                          data:DataFrame,
+                          axis:Axis):
+        non_outliers = outliers_to_median(data[axis.value])
+        data.loc[
+                non_outliers.index,
+                Axis.x_axis.value
+                ] = non_outliers
+
+    @property
+    def non_outliers_data(self):
+        if self._non_outliers_data is not None:
+            return self._non_outliers_data
+        data = self._data.copy()
+        print(data.head())
+        self._non_outliers_axis(
+            data=data,
+            axis=Axis.x_axis
+        )
+        self._non_outliers_axis(
+            data=data,
+            axis=Axis.y_axis
+        )
+        self._non_outliers_axis(
+            data=data,
+            axis=Axis.z_axis
+        )
+        self._non_outliers_axis(
+            data=data,
+            axis=Axis.pvs_axis
+        )
         return data
-    def process_data(self)->DataFrame:
-        """ 
-        Returns a DataFrame representation of the measurement data. 
 
-        Columns are 'Start Time', 'X_AP', 'Y_AP', 'Z_AP' and 'PVS'
+    def pvs_by_interval(
+            self,
+            axis:Optional[Axis|List[Axis]]=None,
+            non_outliers:Optional[bool]=False
+            ):
+        """
+        Max value for the given interval.
+
+        Parameters
+        ----------
+        Args:
+            interval (Optional[int], optional):
+                Number of seconds to calculate pvs value. 
+                Defaults None return by interval of 1 second.
+            axis (Optional[Axis|List[Axis]], optional):
+                Specific axis to calculate pvs value. Defaults None return all Axis.
 
         Returns:
             _type_: DataFrame
         """
-        self._data['fix'] = (self._data['Address']-1)//10
-        ppvs:DataFrame = self._data.groupby('fix')[['Start Time', 'X_AP', 'Y_AP', 'Z_AP']]
-        ppvs = ppvs.max()
-        ppvs['PVS'] = sqrt(ppvs['X_AP']**2 + ppvs['Y_AP']**2 + ppvs['Z_AP']**2)
-        return ppvs.rename(columns={'X_AP': 'X_PPV', 'Y_AP': 'Y_PPV', 'Z_AP':'Z_PPV'})
+        if non_outliers:
+            data = self.non_outliers_data.copy()
+        else:
+            data = self._data.copy()
+        data['id'] = (data.index)//(self.interval*10)
+        by_interval:DataFrame = data.groupby('id').max()[
+            ['Start Time',
+             'X', 
+             'Y', 
+             'Z']
+             ]
+        if axis == None:
+            return by_interval
+        elif isinstance(axis, Axis):
+            return by_interval[
+                ['Start Time',
+                 axis.value
+                 ]
+                 ]
+        else:
+            raise ValueError(
+                f"{self.interval} is not a valid axis."
+                )
+    
+class Vibration(ABC):
+    @abstractmethod
+    def info(self):
+        pass
+    
+    @abstractmethod
+    def formatted_data(self):
+        """ 
+        Returns a DataFrame representation of measurement data. 
 
-    def __getitem__(self, key:Literal['X_AP', 'Y_AP', 'Z_AP'])->Series:
-        return self._data[key]
+        Columns are 'Start Time', 'X', 'Y', 'Z' and 'PVS'
 
-class SENTRYVibrations(Vibrations):
+        Returns:
+            _type_: DataFrame
+        """
+        pass
+
+    @abstractmethod
+    def file_number(self)->str:
+        pass
+
+class RionVibration(Vibration):
+    def __init__(
+            self,
+            data_path:str
+                ):
+        self._data_path = data_path
+        self._data = self._load_data(data_path)
+        self.summary = Summary(self.formatted_data)
+
+    def _load_data(self, data_path:str):
+        data = read_csv(
+            data_path,
+            skiprows=1
+            )
+        data['Start Time'] = to_datetime(
+            data['Start Time'],
+            yearfirst=True
+            )
+        return data
+    
+    @property
+    def info(self):
+        return RionMeasurementInfo(self._data)
+    
+    @property
+    def formatted_data(self):
+        return RionFormatter(self._data)
+
+    @property
+    def file_number(self):
+        return str(
+            search(
+                r'_(\d){4}_', self._data_path
+                ).group()[1:-1])
+
+class VibrationDirectory(Vibration):
+    def __init__(self):
+        self.children = {}
+
+    def add(self, child:Vibration):
+        self.children[child.file_number()] = child
+
+class SENTRYVibrations(Vibration):
     def _load_data(self):
         # Implementación específica para cargar datos de archivos SENTRY
         print(f"Loading SENTRY data from {self.file_path}")

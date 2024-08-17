@@ -16,9 +16,8 @@ def get_outliers(data:Series, k_factor:int=1.5)->Series:
     outliers = data[(data < lower) | (data > upper)]
     return outliers
 
-def outliers_to_median(data:Series, outliers:Series=None)->Series:
-    if outliers is None:
-        outliers = get_outliers(data)
+def outliers_to_median(data:Series)->Series:
+    outliers = get_outliers(data)
     median = data.median()
     # Asegúrate de que outliers es una Serie de booleanos con el mismo índice que data
     if not isinstance(outliers, Series):
