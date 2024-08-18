@@ -17,6 +17,9 @@ class DataType(Enum):
     rion = 'Rion'
 
 class FormatData(ABC):
+    @property
+    def data(self):
+        return self.formatted_data()
     @abstractmethod
     def formatted_data(self,
                        weighted:Optional[bool]=True
@@ -33,7 +36,7 @@ class FormatData(ABC):
 
 class RionFormatter(FormatData):
     def __init__(self, data:DataFrame):
-        self._data = data
+        self._original_data = data
 
     def formatted_data(
             self,
@@ -44,14 +47,14 @@ class RionFormatter(FormatData):
                 'X':'X_APW',
                 'Y':'Y_APW',
                 'Z':'Z_APW'
-            }
+                }
         else:
             axis = {
                 'X':'X_AP',
                 'Y':'Y_AP',
                 'Z':'Z_AP'
                 }
-        data = self._data.copy()
+        data = self._original_data.copy()
         data['PVS'] = sqrt(data[axis['X']]**2 + 
                            data[axis['Y']]**2 + 
                            data[axis['Z']]**2)
@@ -100,11 +103,30 @@ class RionMeasurementInfo(MeasurementInfo):
 
 class Summary:
     def __init__(self, 
-                 formatted_data:FormatData,
-                 interval:Optional[int]=1):
-        self._data = formatted_data.formatted_data()
-        self._non_outliers_data = None
-        self.interval = interval
+                 formatted_data:FormatData):
+        self._formatted_data = formatted_data
+        self.data = formatted_data.data
+
+    def peak(self):
+        return self.data.loc[self.idxpeak()]
+
+    def idxpeak(self):
+        return self.data[['X',
+                          'Y',
+                          'Z']].idxmax()
+    
+    def idxmin(self):
+        return self.data[['X',
+                          'Y',
+                          'Z']].idxmin()
+
+    @property
+    def data(self)->DataFrame:
+        return self._data
+    
+    @data.setter
+    def data(self, value:DataFrame):
+        self._data = value
 
     def _non_outliers_axis(self,
                           data:DataFrame,
@@ -115,12 +137,14 @@ class Summary:
                 Axis.x_axis.value
                 ] = non_outliers
 
-    @property
-    def non_outliers_data(self):
-        if self._non_outliers_data is not None:
-            return self._non_outliers_data
-        data = self._data.copy()
-        print(data.head())
+    def replace_outliers(self):
+        """
+        Replace outliers with the median values.
+
+        Returns:
+            _type_: Summary class
+        """
+        data = self.data.copy()
         self._non_outliers_axis(
             data=data,
             axis=Axis.x_axis
@@ -137,12 +161,13 @@ class Summary:
             data=data,
             axis=Axis.pvs_axis
         )
-        return data
+        self.data = data
+        return self
 
     def pvs_by_interval(
             self,
             axis:Optional[Axis|List[Axis]]=None,
-            non_outliers:Optional[bool]=False
+            interval:Optional[int]=1
             ):
         """
         Max value for the given interval.
@@ -159,11 +184,8 @@ class Summary:
         Returns:
             _type_: DataFrame
         """
-        if non_outliers:
-            data = self.non_outliers_data.copy()
-        else:
-            data = self._data.copy()
-        data['id'] = (data.index)//(self.interval*10)
+        data = self.data.copy()
+        data['id'] = (data.index)//(interval*10)
         by_interval:DataFrame = data.groupby('id').max()[
             ['Start Time',
              'X', 

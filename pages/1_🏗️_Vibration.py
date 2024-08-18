@@ -20,7 +20,11 @@ with open(path, "rb") as f:
     
 if debug:
     example = RionVibration(data_path=path)
-    st.write(example.summary.pvs_by_interval())
+    st.write("Original_data")
+    st.write(example.summary.peak())
+    non_outliers = example.summary.replace_outliers()
+    st.write("Replaced_data")
+    st.write(example.summary.peak())
     st.stop()
 
 HELP_PPV_CHECKER = """
